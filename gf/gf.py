@@ -91,7 +91,7 @@ def sort_mutation_types(branchtypes):
 		raise ValueError(f'sort_mutation_types not implemented for {type(branchtypes)}')
 
 def inverse_laplace(equation, dummy_variable):
-	return (sage.all.inverse_laplace(subequation / dummy_variable, dummy_variable, sage.all.SR.var('T', domain='real'), algorithm='maxima') for subequation in equation)
+	return (sage.all.inverse_laplace(subequation / dummy_variable, dummy_variable, sage.all.SR.var('T', domain='real'), algorithm='giac') for subequation in equation)
 
 def probK(gf, branchtype_mucount_dict, theta):
 	"""return partial derivative of gf as defined by branch_type_mucount_dict
@@ -173,7 +173,7 @@ def make_graph(all_paths, name):
 
 
 class GFObject:
-	def __init__(self, sample_list, coalescence_rates, branchtype_dict, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None, ancestral_pop=0):
+	def __init__(self, sample_list, coalescence_rates, branchtype_dict, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
 		assert len(sample_list) == len(coalescence_rates)
 		if sum(1 for pop in sample_list if len(pop)>0)>1:
 			assert migration_direction or exodus_direction, 'lineages from different populations cannot coalesce without migration or exodus event.'
@@ -190,7 +190,7 @@ class GFObject:
 			self.exodus_rate = sage.all.var('E') #set domain?
 		else:
 			self.exodus_rate = exodus_rate
-		self.ancestral_pop = ancestral_pop
+		#self.ancestral_pop = ancestral_pop
 
 	def coalescence_events(self, state_list):
 		"""Generator returning all possible new population configurations due to coalescence,
@@ -281,7 +281,7 @@ class GFObject:
 		result=[]
 		while stack:
 			gf_n, state_list =stack.pop()
-			if len(state_list[self.ancestral_pop])==1 and sum(len(pop) for pop in state_list)==1:
+			if sum(len(pop) for pop in state_list)==1:		
 				yield gf_n
 			else:
 				for gf_nplus1 in self.gf_single_step(gf_n, state_list):
@@ -306,7 +306,7 @@ class GFObject:
 		result=[]
 		while stack:
 			tracking_list, state_list =stack.pop()
-			if len(state_list[self.ancestral_pop])==1 and sum(len(pop) for pop in state_list)==1:
+			if sum(len(pop) for pop in state_list)==1:
 				yield tracking_list
 			else:
 				for new_step in self.gf_single_step_graph(tracking_list, state_list):

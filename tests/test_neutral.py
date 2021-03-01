@@ -1,6 +1,6 @@
 import pytest
 import gf.gf as gflib
-import time
+from timeit import default_timer as timer
 import sage.all
 import numpy as np
 import tests.aux_functions as af
@@ -268,15 +268,16 @@ class Test_debug:
 			sample_list, 
 			coalescence_rates, 
 			branchtype_dict,
-			migration_direction = [(2,1)],
-			migration_rate=1,
-			ancestral_pop=1
+			migration_direction = [(1,2)],
+			migration_rate=sage.all.var('M'),
+			exodus_direction=[(1,2,0)],
+			exodus_rate=sage.all.var('E')
 			)
 		gf=list(gfobj.make_gf_graph())
 		for g in gf:
 			print(g)
 		print(len(gf))
-		gflib.make_graph(gf, 'mig_BA')
+		gflib.make_graph(gf, 'IM_AB')
 		assert False
 
 @pytest.mark.gimble
@@ -295,29 +296,36 @@ class Test_gf_against_gimble:
 			migration_rate=migration_rate, 
 			migration_direction=gf_vars.get('migration_direction'), 
 			exodus_rate=exodus_rate, 
-			exodus_direction=gf_vars.get('exodus_direction'),
-			ancestral_pop=gf_vars.get('ancestral_pop')
+			exodus_direction=gf_vars.get('exodus_direction')
 			)
+		start_time = timer()
 		gf = gfobj.make_gf()
 		if exodus_rate != None:
 			inverse = sum(gflib.inverse_laplace(gf, exodus_rate))
 		else:
 			inverse=sum(gf)
+		int_time=timer()
+		print(f'gf:{int_time-start_time}')
 		ordered_mutype_list = gflib.sort_mutation_types(branchtype_dict)
 		kmax_by_mutype = (2,2,2,2)
 		theta_symbolic = sage.all.var('theta')
 		theta = self.get_theta(global_info, sim_config)
 		parameter_dict = self.get_parameter_dict(global_info, sim_config, gf_vars, coalescence_rates)
 		parameter_dict[theta_symbolic] = theta
-		print(parameter_dict)
+		start_time=timer()
 		symbolic_prob_dict = gflib.make_symbolic_prob_dict(inverse, ordered_mutype_list, kmax_by_mutype, theta_symbolic)
+		print(f'symbolic prob dict:{timer()-start_time}')
 		#make param_dict
+		start_time = timer()
 		substituted_values = gflib.substitute_parameters(symbolic_prob_dict, parameter_dict, ordered_mutype_list, kmax_by_mutype)
 		#print(substituted_values)
+		print(f'subst values:{timer()-start_time}')
+		start_time = timer()
 		result_array = gflib.dict_to_array(substituted_values, tuple(k+2 for k in kmax_by_mutype))
 		print(sage.all.RealField(165)(result_array[0,0,0,0]))
 		final_result = gflib.adjust_marginals(result_array, len(ordered_mutype_list))
 		print('test:',float(sage.all.RealField(165)(final_result[0,0,0,0])))
+		print(f'remaining times: {timer()-start_time}')
 		return final_result
 
 	def get_parameter_dict(self, global_info, sim_config, gf_vars, coalescence_rates):
@@ -355,4 +363,5 @@ class Test_gf_against_gimble:
 	def test_ETPs(self):
 		#self.compare_ETPs_model(config)
 		#self.compare_ETPs_model('DIV')
-		self.compare_ETPs_model('MIG_BA')
+		#self.compare_ETPs_model('MIG_BA')
+		self.compare_ETPs_model('IM_AB')
