@@ -268,8 +268,8 @@ class Test_debug:
 			sample_list, 
 			coalescence_rates, 
 			branchtype_dict,
-			migration_direction = [(1,2)],
-			migration_rate=sage.all.var('M'),
+			#migration_direction = [(1,2)],
+			#migration_rate=sage.all.var('M'),
 			exodus_direction=[(1,2,0)],
 			exodus_rate=sage.all.var('E')
 			)
@@ -277,6 +277,7 @@ class Test_debug:
 		for g in gf:
 			print(g)
 		print(len(gf))
+		sys.exit()
 		gflib.make_graph(gf, 'IM_AB')
 		assert False
 
@@ -298,14 +299,11 @@ class Test_gf_against_gimble:
 			exodus_rate=exodus_rate, 
 			exodus_direction=gf_vars.get('exodus_direction')
 			)
-		start_time = timer()
 		gf = gfobj.make_gf()
 		if exodus_rate != None:
-			inverse = sum(gflib.inverse_laplace(gf, exodus_rate))
+			inverse = gflib.inverse_laplace(gf, exodus_rate)
 		else:
-			inverse=sum(gf)
-		int_time=timer()
-		print(f'gf:{int_time-start_time}')
+			inverse = gf
 		ordered_mutype_list = gflib.sort_mutation_types(branchtype_dict)
 		kmax_by_mutype = (2,2,2,2)
 		theta_symbolic = sage.all.var('theta')
@@ -313,20 +311,16 @@ class Test_gf_against_gimble:
 		parameter_dict = self.get_parameter_dict(global_info, sim_config, gf_vars, coalescence_rates)
 		parameter_dict[theta_symbolic] = theta
 		start_time=timer()
-		symbolic_prob_dict = gflib.make_symbolic_prob_dict(inverse, ordered_mutype_list, kmax_by_mutype, theta_symbolic)
+		#result is a numpy array with equations
+		symbolic_prob_array = gflib.make_symbolic_prob_array(inverse, ordered_mutype_list, kmax_by_mutype, theta_symbolic, chunksize=5, num_processes=4)
 		print(f'symbolic prob dict:{timer()-start_time}')
-		#make param_dict
 		start_time = timer()
-		substituted_values = gflib.substitute_parameters(symbolic_prob_dict, parameter_dict, ordered_mutype_list, kmax_by_mutype)
-		#print(substituted_values)
-		print(f'subst values:{timer()-start_time}')
-		start_time = timer()
-		result_array = gflib.dict_to_array(substituted_values, tuple(k+2 for k in kmax_by_mutype))
-		print(sage.all.RealField(165)(result_array[0,0,0,0]))
-		final_result = gflib.adjust_marginals(result_array, len(ordered_mutype_list))
-		print('test:',float(sage.all.RealField(165)(final_result[0,0,0,0])))
-		print(f'remaining times: {timer()-start_time}')
-		return final_result
+		print(sage.all.RealField(165)(symbolic_prob_array[0,0,0,0].subs(parameter_dict)))
+		sys.exit()
+		fc_symbolic = gflib.ar_to_fast_callable(symbolic_prob_array, tuple(parameter_dict.keys()))
+		#make parameterdict conform to variables tuple
+		#gflib.evaluate_fast_callable_ar(fc_symbolic, tuple(parameter_dict.values()))
+		return gflib.evaluate_ar(symbolic_prob_array, parameter_dict)
 
 	def get_parameter_dict(self, global_info, sim_config, gf_vars, coalescence_rates):
 		parameter_dict = {}
@@ -353,15 +347,29 @@ class Test_gf_against_gimble:
 	def compare_ETPs_model(self, config):
 		gimbled_ETPs = np.squeeze(np.load(f'tests/ETPs/{config}.npy'))
 		ETPs_to_test = self.generate_ETPs(**all_configs[config])
+		print('test_ETPs:', ETPs_to_test[0,0,0,0])
 		print('gimble:', gimbled_ETPs[0,0,0,0])
-		assert np.all(ETPs_to_test>=0)
-		sys.exit()
-		af.scatter_loglog(gimbled_ETPs, ETPs_to_test, config)
-		assert np.array_equal(gimbled_ETPs, ETPs_to_test)
+		assert np.all(np.isclose(gimbled_ETPs, ETPs_to_test))
 
 	#@pytest.mark.parametrize('config', [('IM_AB'),('DIV'), ('MIG_BA')])
 	def test_ETPs(self):
 		#self.compare_ETPs_model(config)
-		#self.compare_ETPs_model('DIV')
+		self.compare_ETPs_model('DIV')
 		#self.compare_ETPs_model('MIG_BA')
-		self.compare_ETPs_model('IM_AB')
+		#self.compare_ETPs_model('IM_AB')
+
+@pytest.mark.dev
+class Test_dev:
+	def test_fast_callable(self):
+		sage.all.var('x','y','z')
+		d = {(0,1):x**2+x*y+z**3, (1,1):x*y*z, (0,0):sage.all.diff(x,x), (1,0):x}
+		rarray = gflib.dict_to_array(d, (2,2))
+		shape = rarray.shape
+		result = gflib.ar_to_fast_callable(rarray, [x,y,z])
+		#evaluate point in (1,1,1)
+		print(gflib.evaluate_ar(result, (1,1,1), shape))
+
+		#df = {key:(sage.all.fast_callable(value, vars=[x,y,z], domain=sage.all.RealField(165)) if len(value.arguments())>0 else sage.all.RealField(165)(value)) for key, value in d.items()}
+		#ff = [v(1,1,1) if isinstance(v, sage.ext.interpreters.wrapper_rr.Wrapper_rr) else v for v in df.values()]
+		#print(ff)
+		assert False
