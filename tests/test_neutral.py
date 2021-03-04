@@ -129,14 +129,6 @@ class Test_aux:
 
 @pytest.mark.gf
 class Test_gf:
-	#def test_gf(self):
-	#	sample_list = [('a','b','c')]
-	#	branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='label')
-	#	gfobj = gflib.GFObject(sample_list, (1,), branchtype_dict)
-	#	result = list(gfobj.make_gf())
-	#	subs_dict = {k:0 for k in set(branchtype_dict.values())}
-	#	assert all(prob==1/3 for prob in [x.substitute(subs_dict) for x in result])
-
 	def test_gf_unrooted(self):
 		sample_list = [('a','a','b','b')]
 		branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='unrooted')
@@ -191,29 +183,6 @@ class Test_gf:
 		print(np.sum(final_result))
 		assert False
 
-	#def test_gf_all_events(self):
-	#	sample_list = [(),('a','a'),('b','b')]
-	#	branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='unrooted')
-	#	exodus_rate = sage.all.var('E')
-	#	migration_rate = sage.all.var('M')
-	#	gfobj = gflib.GFObject(
-	#		sample_list, 
-	#		(1,1,1), 
-	#		branchtype_dict, 
-	#		exodus_rate=exodus_rate, 
-	#		exodus_direction=[(1,2,0)],
-	#		migration_rate=migration_rate,
-	#		migration_direction=[(1,2)]
-	#		)
-	#	result = list(gfobj.make_gf())
-	#	subs_dict = {k:0 for k in set(branchtype_dict.values())}
-	#	assert sum([x.substitute(subs_dict) for x in result])==1
-	#	inverse = gflib.inverse_laplace(result, exodus_rate)
-	#	branchtype_mucount_dict={k:0 for k in set(branchtype_dict.values())}
-	#	derivative = gflib.probK(sum(inverse), branchtype_mucount_dict, 0.5)
-	#	print(derivative)
-	#	assert False
-
 @pytest.mark.simple_models
 class Test_gf_simple:
 	def test_generate_ETPs(self):
@@ -226,26 +195,21 @@ class Test_gf_simple:
 			coalescence_rates, 
 			branchtype_dict
 			)
-		gf=sum(gfobj.make_gf())
+		gf=gfobj.make_gf()
 		ordered_mutype_list = gflib.sort_mutation_types(branchtype_dict)
 		kmax_by_mutype=(2,2)
-		symbolic_prob_dict = gflib.make_symbolic_prob_dict(gf, ordered_mutype_list, kmax_by_mutype, theta)
-		result = gflib.substitute_parameters(symbolic_prob_dict, {}, ordered_mutype_list, kmax_by_mutype)
-		result_array = gflib.dict_to_array(result, tuple(k+2 for k in kmax_by_mutype))
+		symbolic_prob_array =  gflib.make_symbolic_prob_array(gf, ordered_mutype_list, kmax_by_mutype, theta, dummy_variable=None, chunksize=100, num_processes=1, adjust_marginals=False)
+		result = gflib.evaluate_ar(symbolic_prob_array, {})
 		check = np.array([[0.5, 0.125,0.03125,0.66666667],
  				[0.125, 0.0625, 0.0234375, 0.22222222],
  				[0.03125, 0.0234375, 0.01171875, 0.07407407],
  				[0.66666667, 0.22222222, 0.07407407, 1]])
-		self.adjust_marginals(result_array, len(ordered_mutype_list))
-		assert np.allclose(result_array, check)
+		self.adjust_marginals(result, len(ordered_mutype_list))
+		assert np.allclose(result, check)
 		
 	def adjust_marginals(self, result, num_mutypes):
 		print(result)
 		final_result = gflib.adjust_marginals(result, num_mutypes)
-		#check = np.array([[0.5, 0.125, 0.03125, 0.01041667],
- 		#		[0.125, 0.0625, 0.0234375, 0.01128472],
- 		#		[0.03125, 0.0234375, 0.01171875, 0.00766782],
- 		#		[0.01041667, 0.01128472, 0.00766782, 0.00766782]])
 		assert np.sum(final_result) == 1
 		marginals = np.sum(result[:,:-1],axis=1)+final_result[:,-1]
 		marginals[-1] = 1
@@ -255,7 +219,13 @@ class Test_gf_simple:
 		ordered_mutype_list = [sage.all.var('z_a'), sage.all.var('z_b')]
 		theta = sage.all.var('theta')/2
 		gf = 1/(sum(ordered_mutype_list)+1)
-		probk = gflib.probK(gf, {k:1 for k in ordered_mutype_list}, theta)
+		partials = ordered_mutype_list[:]
+		marginals = {}
+		ratedict = {mutype:theta for mutype in ordered_mutype_list}
+		mucount_total = 2
+		mucount_fact_prod = 1 
+		probk = gflib.simple_probK(gf, theta, partials, marginals, ratedict, mucount_total, mucount_fact_prod)
+		#test probability of seeing 1 mutation on each branch
 		assert probk == 1/2*(2*theta)**2/(2*theta+1)**3
 
 @pytest.mark.graph
@@ -279,7 +249,7 @@ class Test_debug:
 		print(len(gf))
 		sys.exit()
 		gflib.make_graph(gf, 'IM_AB')
-		assert False
+		assert True
 
 @pytest.mark.gimble
 class Test_gf_against_gimble:
@@ -300,10 +270,7 @@ class Test_gf_against_gimble:
 			exodus_direction=gf_vars.get('exodus_direction')
 			)
 		gf = gfobj.make_gf()
-		if exodus_rate != None:
-			inverse = gflib.inverse_laplace(gf, exodus_rate)
-		else:
-			inverse = gf
+		
 		ordered_mutype_list = gflib.sort_mutation_types(branchtype_dict)
 		kmax_by_mutype = (2,2,2,2)
 		theta_symbolic = sage.all.var('theta')
@@ -312,15 +279,16 @@ class Test_gf_against_gimble:
 		parameter_dict[theta_symbolic] = theta
 		start_time=timer()
 		#result is a numpy array with equations
-		symbolic_prob_array = gflib.make_symbolic_prob_array(inverse, ordered_mutype_list, kmax_by_mutype, theta_symbolic, chunksize=5, num_processes=4)
+		print('making symbolic prob array')
+		#symbolic_prob_array = gflib.make_symbolic_prob_array(inverse, ordered_mutype_list, kmax_by_mutype, theta_symbolic, chunksize=50, num_processes=1)
+		symbolic_prob_array = gflib.make_symbolic_prob_array(gf, ordered_mutype_list, kmax_by_mutype, theta_symbolic, dummy_variable=exodus_rate, chunksize=10, num_processes=1)
 		print(f'symbolic prob dict:{timer()-start_time}')
 		start_time = timer()
 		print(sage.all.RealField(165)(symbolic_prob_array[0,0,0,0].subs(parameter_dict)))
-		sys.exit()
-		fc_symbolic = gflib.ar_to_fast_callable(symbolic_prob_array, tuple(parameter_dict.keys()))
-		#make parameterdict conform to variables tuple
-		#gflib.evaluate_fast_callable_ar(fc_symbolic, tuple(parameter_dict.values()))
-		return gflib.evaluate_ar(symbolic_prob_array, parameter_dict)
+		shape = symbolic_prob_array.shape
+		substituted_array = np.reshape([sage.all.RealField(165)(e.subs(parameter_dict)) for e in symbolic_prob_array.reshape(-1)], shape)
+		substituted_array = gflib.adjust_marginals(substituted_array, len(ordered_mutype_list)).astype(dtype=np.float64)
+		return substituted_array
 
 	def get_parameter_dict(self, global_info, sim_config, gf_vars, coalescence_rates):
 		parameter_dict = {}
@@ -353,23 +321,11 @@ class Test_gf_against_gimble:
 
 	#@pytest.mark.parametrize('config', [('IM_AB'),('DIV'), ('MIG_BA')])
 	def test_ETPs(self):
-		#self.compare_ETPs_model(config)
-		self.compare_ETPs_model('DIV')
-		#self.compare_ETPs_model('MIG_BA')
-		#self.compare_ETPs_model('IM_AB')
-
-@pytest.mark.dev
-class Test_dev:
-	def test_fast_callable(self):
-		sage.all.var('x','y','z')
-		d = {(0,1):x**2+x*y+z**3, (1,1):x*y*z, (0,0):sage.all.diff(x,x), (1,0):x}
-		rarray = gflib.dict_to_array(d, (2,2))
-		shape = rarray.shape
-		result = gflib.ar_to_fast_callable(rarray, [x,y,z])
-		#evaluate point in (1,1,1)
-		print(gflib.evaluate_ar(result, (1,1,1), shape))
-
-		#df = {key:(sage.all.fast_callable(value, vars=[x,y,z], domain=sage.all.RealField(165)) if len(value.arguments())>0 else sage.all.RealField(165)(value)) for key, value in d.items()}
-		#ff = [v(1,1,1) if isinstance(v, sage.ext.interpreters.wrapper_rr.Wrapper_rr) else v for v in df.values()]
-		#print(ff)
-		assert False
+		config='IM_AB' #DIV, MIG_BA or IM_AB
+		main_timer = timer()
+		test = Test_gf_against_gimble()
+		ETPs_to_test = test.generate_ETPs(**all_configs[config])
+		print(f'process took: {timer()-main_timer}')
+		gimbled_ETPs = np.squeeze(np.load(f'tests/ETPs/{config}.npy'))
+		print('gimble:', gimbled_ETPs[0,0,0,0])
+		assert np.all(np.isclose(gimbled_ETPs, ETPs_to_test))

@@ -10,9 +10,10 @@ import copy
 import sys
 import networkx as nx
 import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import multiprocessing
-matplotlib.use("Agg")
+from timeit import default_timer as timer
 
 def powerset(iterable):
 	"""returns generator containing all possible subsets of iterable
@@ -104,55 +105,58 @@ def split_gf(gf, chunksize):
 		yield piece
 		piece = sum(itertools.islice(i, chunksize))
 
-def probK(gf, branchtype_mucount_dict, theta):
-	"""return partial derivative of gf as defined by branch_type_mucount_dict
-		gf {[type]} -- [generating function]
-		branchtype_mucount_dict {[dict]} -- [dict of all branch types and the number of mutations observed along them, None if branchtype should be marginalized over]
-	"""
-	numeric_mucounts = [value for value in branchtype_mucount_dict.values() if value] 
-	total_mucounts = sage.all.sum(numeric_mucounts)
-	product_fact_mucounts = sage.all.product(sage.all.factorial(count) for count in numeric_mucounts)
-	marginals_subdict = {branchtype:0 for branchtype, count in branchtype_mucount_dict.items() if count==None}
-	mutation_rate_subdict = {branchtype:theta for branchtype, count in branchtype_mucount_dict.items() if isinstance(count, int)}
-	gfs = gf.substitute(marginals_subdict)
-	partials = list(flatten(itertools.repeat(branchtype,count)) for branchtype, count in branchtype_mucount_dict.items() if isinstance(count, int))
-	derivative = sage.all.diff(gfs,partials)
-	return (-1*theta)**(total_mucounts)/product_fact_mucounts*derivative.substitute(mutation_rate_subdict)
-
+def split_gf_iterable(gf, chunksize):
+	#splitting gf generator using chunksize
+	i = iter(gf)
+	piece = list(itertools.islice(i, chunksize))
+	while piece:
+		yield piece
+		piece = list(itertools.islice(i, chunksize))
+	
 def simple_probK(gf, theta, partials, marginals, ratedict, mucount_total, mucount_fact_prod):
 	gf_marginals = gf.substitute(marginals)
 	derivative = sage.all.diff(gf_marginals,partials)
 	return (-1*theta)**(mucount_total)/mucount_fact_prod*derivative.substitute(ratedict)
 
-def symbolic_prob_per_term(gf_term, prob_input_subdict, shape, theta):
+def symbolic_prob_per_term(gf_term, prob_input_subdict, shape, theta, adjust_marginals=False):
 	result = {mutation_configuration:simple_probK(gf_term, theta, **subdict) for mutation_configuration, subdict in prob_input_subdict.items()}
 	result_array = dict_to_array(result, shape)
-	result_array = adjust_marginals(result_array, len(shape))
+	if adjust_marginals==True:
+		result_array = adjust_marginals(result_array, len(shape))
 	return result_array
 
-def make_symbolic_prob_array(gf, ordered_mutype_list, kmax_by_mutype, theta, chunksize=100, num_processes=1):
-	"""return full table of mutation configuration probabilities up to kmax
-	Arguments:
-		gf {[type]} -- [generating function]
-		ordered_mutype_list {[list] -- [all possible mutation types]}
-		kmax_by_mutype {[list]} -- [list of kmax for respective mutype, ordered as ordered_mutype_list]
-	"""
+def process_grouped_terms(gf_terms, dummy_variable, prob_input_dict, shape, theta, adjust_marginals):
+	start_time=timer()
+	if dummy_variable:
+			gf_to_use = sum(inverse_laplace(gf_terms, dummy_variable))
+	else:
+		gf_to_use = sum(gf_terms)
+	result = symbolic_prob_per_term(gf_to_use, prob_input_dict, shape, theta, adjust_marginals) 
+	print(timer()-start_time)
+	return result
+
+def make_symbolic_prob_array(gf, ordered_mutype_list, kmax_by_mutype, theta, dummy_variable, chunksize=100, num_processes=1, adjust_marginals=False):
 	iterable_range = (range(k+2) for k in kmax_by_mutype)
 	all_mutation_configurations = itertools.product(*iterable_range)
 	prob_input_dict = prepare_symbolic_prob_dict(ordered_mutype_list, kmax_by_mutype, theta)
 	shape = tuple(kmax+2 for kmax in kmax_by_mutype)
-	if num_processes == 1: 
-		symbolic_prob_array = sum(symbolic_prob_per_term(gf_term, prob_input_dict, shape, theta) for gf_term in split_gf(gf, chunksize))
+	#gf is generator for gf prior to taking inverse laplace
+	symbolic_prob_array = []
+	if num_processes==1:
+		symbolic_prob_array = sum([process_grouped_terms(
+			gf_terms, dummy_variable, prob_input_dict, shape, theta, adjust_marginals) 
+				for gf_terms in split_gf_iterable(gf, chunksize)])
 	else:
-		print('running parallel processes')
-		symbolic_prob_per_term_specified = functools.partial(
-			symbolic_prob_per_term,
+		process_grouped_terms_specified = functools.partial(
+			process_grouped_terms,
+			dummy_variable=dummy_variable,
 			prob_input_subdict=prob_input_dict,
 			shape=shape,
-			theta=theta
+			theta=theta,
+			adjust_marginals=adjust_marginals
 			)
 		with multiprocessing.Pool(processes=num_processes) as pool:
-			symbolic_prob_array = sum(pool.imap(symbolic_prob_per_term_specified, split_gf(gf, chunksize)))
+			symbolic_prob_array = sum(pool.imap(process_grouped_terms_specified, split_gf(gf, chunksize)))
 	return symbolic_prob_array
 
 def prepare_symbolic_prob_dict(ordered_mutype_list, kmax_by_mutype, theta):
@@ -239,7 +243,6 @@ class GFObject:
 			self.exodus_rate = sage.all.var('E') #set domain?
 		else:
 			self.exodus_rate = exodus_rate
-		#self.ancestral_pop = ancestral_pop
 
 	def coalescence_events(self, state_list):
 		"""Generator returning all possible new population configurations due to coalescence,
@@ -318,8 +321,9 @@ class GFObject:
 			outcomes = self.rates_and_events(state_list)
 			total_rate = sum([rate for rate, state in outcomes])
 			dummy_sum = sum(self.branchtype_dict[b] for b in current_branches)    
-			for rate, new_state_list in outcomes:
-				yield (gf_old*rate*1/(total_rate + dummy_sum), new_state_list)
+			#for rate, new_state_list in outcomes:
+			#	yield (gf_old*rate*1/(total_rate + dummy_sum), new_state_list)
+			return [(gf_old*rate*1/(total_rate + dummy_sum), new_state_list) for rate, new_state_list in outcomes]
 		
 	def make_gf(self):
 		"""[generator returning generating function]
@@ -360,4 +364,3 @@ class GFObject:
 			else:
 				for new_step in self.gf_single_step_graph(tracking_list, state_list):
 					stack.append(new_step)
-
