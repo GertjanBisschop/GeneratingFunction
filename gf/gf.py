@@ -2,15 +2,20 @@ import sage.all
 import numpy as np
 import itertools
 import string
-from collections import Counter
+import collections
 import itertools
+import operator
+import functools
 import copy
 import sys
 import networkx as nx
 import matplotlib
-import matplotlib.pyplot as plt
 matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import multiprocessing
+from timeit import default_timer as timer
 
+#auxilliary functions
 def powerset(iterable):
 	"""returns generator containing all possible subsets of iterable
 	Arguments:
@@ -46,16 +51,12 @@ def coalesce_single_pop(pop_state):
 		coal_rate {[sage_var, float]} -- [rate at which coalescence happens in that pop]
 	"""
 	coal_event_pairs = list(itertools.combinations(pop_state,2))
-	#print('pairs:', coal_event_pairs)
-	coal_counts = Counter(coal_event_pairs)
-	#print('pop_state:', pop_state)
-	#print('coal_counts:', coal_counts)
+	coal_counts = collections.Counter(coal_event_pairs)
 	for lineages, count in coal_counts.items():
-		#print('lineages:', lineages)
 		result = coalesce_lineages(pop_state, lineages)
-		#print('result_lineages:', result)
 		yield (count, result)
 
+#dealing with mutation/branchtypes
 def make_branchtype_dict(sample_list, mapping='unrooted'):
 	'''Maps lineages to their respective mutation type
 	Mappings: 'unrooted', 'label'
@@ -90,63 +91,174 @@ def sort_mutation_types(branchtypes):
 	else:
 		raise ValueError(f'sort_mutation_types not implemented for {type(branchtypes)}')
 
+#processing generating function
 def inverse_laplace(equation, dummy_variable):
 	return (sage.all.inverse_laplace(subequation / dummy_variable, dummy_variable, sage.all.SR.var('T', domain='real'), algorithm='giac') for subequation in equation)
 
-def probK(gf, branchtype_mucount_dict, theta):
-	"""return partial derivative of gf as defined by branch_type_mucount_dict
-		gf {[type]} -- [generating function]
-		branchtype_mucount_dict {[dict]} -- [dict of all branch types and the number of mutations observed along them, None if branchtype should be marginalized over]
-	"""
-	numeric_mucounts = [value for value in branchtype_mucount_dict.values() if value] 
-	total_mucounts = sage.all.sum(numeric_mucounts)
-	product_fact_mucounts = sage.all.product(sage.all.factorial(count) for count in numeric_mucounts)
-	marginals_subdict = {branchtype:0 for branchtype, count in branchtype_mucount_dict.items() if count==None}
-	mutation_rate_subdict = {branchtype:theta for branchtype, count in branchtype_mucount_dict.items() if isinstance(count, int)}
-	gfs = gf.substitute(marginals_subdict)
-	partials = [list(itertools.repeat(branchtype,count)) for branchtype, count in branchtype_mucount_dict.items() if isinstance(count, int)]
-	partials = list(flatten(partials))
-	derivative = sage.all.diff(gfs,partials)
-	return (-1*theta)**(total_mucounts)/product_fact_mucounts*derivative.substitute(mutation_rate_subdict)
+def split_gf(gf, chunksize):
+	#splitting gf generator using chunksize
+	i = iter(gf)
+	piece = sum(itertools.islice(i, chunksize))
+	while piece:
+		yield piece
+		piece = sum(itertools.islice(i, chunksize))
 
-def make_symbolic_prob_dict(gf, ordered_mutype_list, kmax_by_mutype, theta):
-	"""return full table of mutation configuration probabilities up to kmax
-	Arguments:
-		gf {[type]} -- [generating function]
-		ordered_mutype_list {[list] -- [all possible mutation types]}
-		kmax_by_mutype {[list]} -- [list of kmax for respective mutype, ordered as ordered_mutype_list]
-	"""
+def split_gf_iterable(gf, chunksize):
+	#splitting gf generator using chunksize
+	i = iter(gf)
+	piece = list(itertools.islice(i, chunksize))
+	while piece:
+		yield piece
+		piece = list(itertools.islice(i, chunksize))
+
+#calculating mutype probabilities
+def single_partial(ordered_mutype_list, partial):
+		return list(flatten(itertools.repeat(branchtype,count) for count, branchtype in zip(partial, ordered_mutype_list)))
+
+def return_mutype_configs(max_k, include_marginals=True):
+	add_to_k = 2 if include_marginals else 1
+	iterable_range = (range(k+add_to_k) for k in max_k)
+	return itertools.product(*iterable_range)
+
+def make_mutype_tree(all_mutypes, root, max_k):
+	result = collections.defaultdict(list)
+	for idx, mutype in enumerate(all_mutypes):
+		if mutype == root:
+			pass
+		else:
+			if any(m>max_k_m for m, max_k_m in zip(mutype, max_k)):
+				root_config = tuple(m if m<=max_k_m else 0 for m, max_k_m in zip(mutype, max_k))
+				result[root_config].append(mutype)
+			else:
+				root_config = differs_one_digit(mutype, all_mutypes[:idx])
+				result[root_config].append(mutype)
+	return result
+
+def make_result_dict_from_mutype_tree(gf, mutype_tree, theta, rate_dict, ordered_mutype_list, max_k):
+	root = tuple(0 for _ in max_k)
+	result = {}
+	result[root] = probK_from_diff(gf, theta, rate_dict, root)
+	intermediate_results = {}
+	intermediate_results[root] = gf
+	for parent, children in mutype_tree.items():
+		for child in children:
+			if any(m>max_k_m for m, max_k_m in zip(child, max_k)):
+				marginals = {branchtype:0 for branchtype, count, m_max_k in zip(ordered_mutype_list, child, max_k) if count>m_max_k}
+				child_mutype = tuple(m if m<=max_k_m else None for m, max_k_m in zip(child, max_k))
+				result[child] = probK_from_diff(intermediate_results[parent].substitute(marginals), theta, rate_dict, child_mutype)
+			else:
+				marginals = None
+				relative_config = [b-a for a,b in zip(parent, child)]
+				partial = single_partial(ordered_mutype_list, relative_config)
+				diff = sage.all.diff(intermediate_results[parent], partial)
+				if child in mutype_tree.keys():
+					intermediate_results[child] = diff
+				result[child] = probK_from_diff(diff, theta, rate_dict, child)
+			
+	return result
+
+def differs_one_digit(query, complete_list):
+	#complete_set = self.generate_differs_one_set(query)
+	#similar_to = next(obj for obj in complete_list[idx-1::-1] if obj in complete_set)
+	similar_to = next(obj for obj in complete_list[::-1] if sum_tuple_diff(obj, query)==1)
+	return similar_to
+
+def sum_tuple_diff(tuple_a, tuple_b):
+	return sum(b-a for a,b in zip(tuple_a, tuple_b))
+	
+def simple_probK(gf, theta, partials, marginals, ratedict, mucount_total, mucount_fact_prod):
+	gf_marginals = gf.substitute(marginals)
+	derivative = sage.all.diff(gf_marginals,partials)
+	return (-1*theta)**(mucount_total)/mucount_fact_prod*derivative.substitute(ratedict)
+
+def probK_from_diff(derivative, theta, ratedict, mut_config):
+	numeric_mucounts = [value for value in mut_config if value]
+	mucount_total = sage.all.sum(numeric_mucounts)
+	mucount_fact_prod = sage.all.product(sage.all.factorial(count) for count in numeric_mucounts)
+	return (-1*theta)**(mucount_total)/mucount_fact_prod*derivative.substitute(ratedict)
+
+def symbolic_prob_per_term_old(gf_term, prob_input_subdict, shape, theta, adjust_marginals=False):
+	result = {mutation_configuration:simple_probK(gf_term, theta, **subdict) for mutation_configuration, subdict in prob_input_subdict.items()}
+	result_array = dict_to_array(result, shape)
+	if adjust_marginals:
+		result_array = adjust_marginals(result_array, len(shape))
+	return result_array
+
+def symbolic_prob_per_term(gf_term, mutype_tree, shape, theta, rate_dict, ordered_mutype_list, max_k, adjust_marginals=False):
+	result = make_result_dict_from_mutype_tree(gf_term, mutype_tree, theta, rate_dict, ordered_mutype_list, max_k)
+	result_array = dict_to_array(result, shape)
+	if adjust_marginals:
+		result_array = adjust_marginals_array(result_array, len(shape))
+	return result_array
+
+def process_grouped_terms(gf_terms, dummy_variable, mutype_tree, shape, rate_dict, theta, ordered_mutype_list, max_k, adjust_marginals, parameter_dict):
+	start_time=timer()
+	if dummy_variable:
+		gf_to_use = sum(inverse_laplace(gf_terms, dummy_variable))
+	else:
+		gf_to_use = sum(gf_terms)
+	if parameter_dict:
+		gf_to_use = gf_to_use.substitute(parameter_dict)
+	result = symbolic_prob_per_term(gf_to_use, mutype_tree, shape, theta, rate_dict, ordered_mutype_list, max_k, adjust_marginals) 
+	print(timer()-start_time)
+	return result
+
+def make_prob_array(gf, mutype_tree, ordered_mutype_list, max_k, theta, dummy_variable, chunksize=100, num_processes=1, adjust_marginals=False, parameter_dict=None):
+	rate_dict = {branchtype:theta for branchtype in ordered_mutype_list}
+	#make mutype tree to simplify makeprobK
+	shape = tuple(kmax+2 for kmax in max_k)
+	#gf is generator for gf prior to taking inverse laplace
+	symbolic_prob_array = []
+	if num_processes==1:
+		symbolic_prob_array = sum([process_grouped_terms(
+			gf_terms, dummy_variable, mutype_tree, shape, rate_dict, theta, ordered_mutype_list, max_k, adjust_marginals, parameter_dict) 
+				for gf_terms in split_gf_iterable(gf, chunksize)])
+	else:
+		process_grouped_terms_specified = functools.partial(
+			process_grouped_terms,
+			dummy_variable=dummy_variable,
+			mutype_tree=mutype_tree,
+			shape=shape,
+			rate_dict=rate_dict,
+			theta=theta,
+			ordered_mutype_list=ordered_mutype_list,
+			max_k=max_k,
+			adjust_marginals=adjust_marginals,
+			parameter_dict=parameter_dict
+			)
+		with multiprocessing.Pool(processes=num_processes) as pool:
+			symbolic_prob_array = sum(pool.imap(process_grouped_terms_specified, split_gf(gf, chunksize)))
+	return symbolic_prob_array
+
+def prepare_symbolic_prob_dict(ordered_mutype_list, kmax_by_mutype, theta):
+	'''
+	deprecated function
+	'''
 	iterable_range = (range(k+2) for k in kmax_by_mutype)
 	all_mutation_configurations = itertools.product(*iterable_range)
-	symbolic_prob_dict = {}
+	prob_input_dict = collections.defaultdict(dict)
 	for mutation_configuration in all_mutation_configurations:
 		branchtype_mucount_dict = {mutype:(count if count<=kmax else None) for mutype, count, kmax in zip(ordered_mutype_list, mutation_configuration, kmax_by_mutype)}
-		symbolic_prob_dict[mutation_configuration] = probK(gf, branchtype_mucount_dict, theta)
-	return symbolic_prob_dict
+		numeric_mucounts = [value for value in branchtype_mucount_dict.values() if value] 
+		prob_input_dict[mutation_configuration]['mucount_total'] = sage.all.sum(numeric_mucounts)
+		prob_input_dict[mutation_configuration]['mucount_fact_prod'] = sage.all.product(sage.all.factorial(count) for count in numeric_mucounts)
+		prob_input_dict[mutation_configuration]['marginals'] = {branchtype:0 for branchtype, count in branchtype_mucount_dict.items() if count==None}
+		prob_input_dict[mutation_configuration]['ratedict'] = {branchtype:theta for branchtype, count in branchtype_mucount_dict.items() if isinstance(count, int)}
+		prob_input_dict[mutation_configuration]['partials'] = list(flatten(itertools.repeat(branchtype,count) for branchtype, count in branchtype_mucount_dict.items() if isinstance(count, int)))
+	return prob_input_dict
 
 def substitute_parameters(symbolic_prob_dict, parameter_dict, ordered_mutype_list, kmax_by_mutype, precision=165):
 	shape = tuple(kmax+2 for kmax in kmax_by_mutype)
 	variables = list(parameter_dict.keys())
-	#fast_callable_dict = {mutation_configuration:sage.all.fast_callable(expression, vars=variables, domain=sage.all.RR) for mutation_configuration, expression in symbolic_prob_dict.items()}
-	#result = {}
-	#for mutation_configuration, expression in symbolic_prob_dict.items():
-	#	x=list(str(expression.arguments()).strip('(),'))
-	#	print(x)
-	#	if len(x)==0:
-	#		print(type(expression))
-	#		print(float(expression))
-	#		print(expression)
-	#	result[mutation_configuration] = expression(*parameter_dict.values()) 
-	#return {mutation_configuration:expression(*parameter_dict.values()) for mutation_configuration, expression in symbolic_prob_dict.items()}
-	#return {mutation_configuration:sage.all.RealField(165)(expression.substitute(parameter_dict)) for mutation_configuration, expression in symbolic_prob_dict.items()}
 	return {mutation_configuration:expression.substitute(parameter_dict) for mutation_configuration, expression in symbolic_prob_dict.items()}
-def adjust_marginals(array, dimension):
-	new_array = copy.deepcopy(array)
+
+def adjust_marginals_array(array, dimension):
+	new_array = copy.deepcopy(array) #why the deepcopy here?
 	for j in range(dimension):
-		new_array = _adjust_marginals(new_array, dimension, j)
+		new_array = _adjust_marginals_array(new_array, dimension, j)
 	return new_array
 
-def _adjust_marginals(array, dimension, j):
+def _adjust_marginals_array(array, dimension, j):
 	idxs = np.roll(range(dimension), j)
 	result = array.transpose(idxs)
 	result[-1] = result[-1] - np.sum(result[:-1], axis=0)
@@ -171,6 +283,22 @@ def make_graph(all_paths, name):
 	nx.draw_spring(G, with_labels=True)
 	plt.savefig(f"{name}.png")
 
+#using fast_callable
+def ar_to_fast_callable(ar, variables):
+	shape = ar.shape
+	temp = np.reshape(ar, -1)
+	result = [sage.all.fast_callable(value, vars=variables, domain=sage.all.RealField(165)) if len(value.arguments())>0 else sage.all.RealField(165)(value) for value in temp]
+	return result
+	
+def evaluate_fast_callable_ar(ar, variables, shape):
+	result = [v(*variables) if isinstance(v, sage.ext.interpreters.wrapper_rr.Wrapper_rr) else v for v in ar]
+	return np.array(result, dtype=np.float64).reshape(shape)
+
+def evaluate_ar(ar, variables_dict):
+	shape = ar.shape
+	temp = np.reshape(ar, -1)
+	result = [v.subs(variables_dict) for v in temp]
+	return np.array(result, dtype=np.float64).reshape(shape)
 
 class GFObject:
 	def __init__(self, sample_list, coalescence_rates, branchtype_dict, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
@@ -190,7 +318,6 @@ class GFObject:
 			self.exodus_rate = sage.all.var('E') #set domain?
 		else:
 			self.exodus_rate = exodus_rate
-		#self.ancestral_pop = ancestral_pop
 
 	def coalescence_events(self, state_list):
 		"""Generator returning all possible new population configurations due to coalescence,
@@ -217,7 +344,7 @@ class GFObject:
 		result = []
 		if self.migration_direction:
 			for source, destination in self.migration_direction:
-				lineage_count = Counter(state_list[source])
+				lineage_count = collections.Counter(state_list[source])
 				for lineage, count in lineage_count.items():
 					temp = list(state_list)
 					idx = temp[source].index(lineage)
@@ -269,8 +396,9 @@ class GFObject:
 			outcomes = self.rates_and_events(state_list)
 			total_rate = sum([rate for rate, state in outcomes])
 			dummy_sum = sum(self.branchtype_dict[b] for b in current_branches)    
-			for rate, new_state_list in outcomes:
-				yield (gf_old*rate*1/(total_rate + dummy_sum), new_state_list)
+			#for rate, new_state_list in outcomes:
+			#	yield (gf_old*rate*1/(total_rate + dummy_sum), new_state_list)
+			return [(gf_old*rate*1/(total_rate + dummy_sum), new_state_list) for rate, new_state_list in outcomes]
 		
 	def make_gf(self):
 		"""[generator returning generating function]
@@ -311,4 +439,3 @@ class GFObject:
 			else:
 				for new_step in self.gf_single_step_graph(tracking_list, state_list):
 					stack.append(new_step)
-
