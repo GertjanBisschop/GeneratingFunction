@@ -252,3 +252,9 @@ class Test_gf_against_gimble:
 		gfobj = test.generate_gf(sample_list, branchtype_dict, **all_configs[config])
 		ETPs_to_test = test.generate_ETPs(gfobj, branchtype_dict, max_k, **all_configs[config])
 		test.compare_ETPs_model(config, ETPs_to_test)
+
+@pytest.mark.topology
+class Test_divide_into_equivalence_classes:
+	def test_basic(self):
+		
+		assert False
