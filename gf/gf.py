@@ -145,7 +145,7 @@ def make_result_dict_from_mutype_tree(gf, mutype_tree, theta, rate_dict, ordered
 			if any(m>max_k_m for m, max_k_m in zip(child, max_k)):
 				marginals = {branchtype:0 for branchtype, count, m_max_k in zip(ordered_mutype_list, child, max_k) if count>m_max_k}
 				child_mutype = tuple(m if m<=max_k_m else None for m, max_k_m in zip(child, max_k))
-				result[child] = probK_from_diff(intermediate_results[parent].substitute(marginals), theta, rate_dict, child_mutype)
+				result[child] = sage.all.RealField(165)(probK_from_diff(intermediate_results[parent].subs(marginals), theta, rate_dict, child_mutype))
 			else:
 				marginals = None
 				relative_config = [b-a for a,b in zip(parent, child)]
@@ -153,8 +153,45 @@ def make_result_dict_from_mutype_tree(gf, mutype_tree, theta, rate_dict, ordered
 				diff = sage.all.diff(intermediate_results[parent], partial)
 				if child in mutype_tree.keys():
 					intermediate_results[child] = diff
-				result[child] = probK_from_diff(diff, theta, rate_dict, child)
-			
+				result[child] = sage.all.RealField(165)(probK_from_diff(diff, theta, rate_dict, child))
+		del intermediate_results[parent] #once all children have been calculate no need to store original
+	return result
+
+def make_result_dict_from_mutype_tree_stack(gf, mutype_tree, theta, rate_dict, ordered_mutype_list, max_k):
+	root = tuple(0 for _ in max_k)
+	result = {}
+	stack = [root,]
+	path_parents = []
+	while stack:
+		node = stack.pop()
+		if node != root:
+			parent, parent_gf = path_parents[-1]
+			if node in mutype_tree:
+				#node is not a leaf
+				for child in mutype_tree[node]:
+					stack.append(child)
+			while node not in mutype_tree[parent]:
+				del path_parents[-1]
+				parent, parent_gf = path_parents[-1]
+			#assert node in mutype_tree[parent]
+		else:
+			parent, parent_gf = root, gf
+			for child in mutype_tree[node]:
+					stack.append(child)
+		
+		#determine whether marginal probability or not
+		if any(m>max_k_m for m, max_k_m in zip(node, max_k)):
+				marginals = {branchtype:0 for branchtype, count, m_max_k in zip(ordered_mutype_list, node, max_k) if count>m_max_k}
+				node_mutype = tuple(m if m<=max_k_m else None for m, max_k_m in zip(node, max_k))
+				result[node] = sage.all.RealField(165)(probK_from_diff(parent_gf.subs(marginals), theta, rate_dict, node_mutype))
+		else:
+			marginals = None
+			relative_config = [b-a for a,b in zip(parent, node)]
+			partial = single_partial(ordered_mutype_list, relative_config)
+			diff = sage.all.diff(parent_gf, partial)
+			if node in mutype_tree:
+				path_parents.append((node, diff))
+			result[node] = sage.all.RealField(165)(probK_from_diff(diff, theta, rate_dict, node))
 	return result
 
 def differs_one_digit(query, complete_list):
@@ -167,15 +204,15 @@ def sum_tuple_diff(tuple_a, tuple_b):
 	return sum(b-a for a,b in zip(tuple_a, tuple_b))
 	
 def simple_probK(gf, theta, partials, marginals, ratedict, mucount_total, mucount_fact_prod):
-	gf_marginals = gf.substitute(marginals)
+	gf_marginals = gf.subs(marginals)
 	derivative = sage.all.diff(gf_marginals,partials)
-	return (-1*theta)**(mucount_total)/mucount_fact_prod*derivative.substitute(ratedict)
+	return (-1*theta)**(mucount_total)/mucount_fact_prod*derivative.subs(ratedict)
 
 def probK_from_diff(derivative, theta, ratedict, mut_config):
 	numeric_mucounts = [value for value in mut_config if value]
-	mucount_total = sage.all.sum(numeric_mucounts)
-	mucount_fact_prod = sage.all.product(sage.all.factorial(count) for count in numeric_mucounts)
-	return (-1*theta)**(mucount_total)/mucount_fact_prod*derivative.substitute(ratedict)
+	mucount_total = np.sum(numeric_mucounts)
+	mucount_fact_prod = np.prod([np.math.factorial(count) for count in numeric_mucounts])
+	return (-1*theta)**(mucount_total)/mucount_fact_prod*derivative.subs(ratedict)
 
 def symbolic_prob_per_term_old(gf_term, prob_input_subdict, shape, theta, adjust_marginals=False):
 	result = {mutation_configuration:simple_probK(gf_term, theta, **subdict) for mutation_configuration, subdict in prob_input_subdict.items()}
@@ -198,7 +235,7 @@ def process_grouped_terms(gf_terms, dummy_variable, mutype_tree, shape, rate_dic
 	else:
 		gf_to_use = sum(gf_terms)
 	if parameter_dict:
-		gf_to_use = gf_to_use.substitute(parameter_dict)
+		gf_to_use = gf_to_use.subs(parameter_dict)
 	result = symbolic_prob_per_term(gf_to_use, mutype_tree, shape, theta, rate_dict, ordered_mutype_list, max_k, adjust_marginals) 
 	print(timer()-start_time)
 	return result
@@ -247,10 +284,10 @@ def prepare_symbolic_prob_dict(ordered_mutype_list, kmax_by_mutype, theta):
 		prob_input_dict[mutation_configuration]['partials'] = list(flatten(itertools.repeat(branchtype,count) for branchtype, count in branchtype_mucount_dict.items() if isinstance(count, int)))
 	return prob_input_dict
 
-def substitute_parameters(symbolic_prob_dict, parameter_dict, ordered_mutype_list, kmax_by_mutype, precision=165):
+def subs_parameters(symbolic_prob_dict, parameter_dict, ordered_mutype_list, kmax_by_mutype, precision=165):
 	shape = tuple(kmax+2 for kmax in kmax_by_mutype)
 	variables = list(parameter_dict.keys())
-	return {mutation_configuration:expression.substitute(parameter_dict) for mutation_configuration, expression in symbolic_prob_dict.items()}
+	return {mutation_configuration:expression.subs(parameter_dict) for mutation_configuration, expression in symbolic_prob_dict.items()}
 
 def adjust_marginals_array(array, dimension):
 	new_array = copy.deepcopy(array) #why the deepcopy here?
