@@ -2,6 +2,7 @@ import numpy as np
 import sage.all
 
 from . import gf as gflib
+from . import mutations
 
 def _get_gfObj(config):
 	sample_list = config['sample_list']
@@ -38,22 +39,22 @@ class gfEvaluator:
 		self.gf = gf
 		self.max_k = max_k
 		self.ordered_mutype_list = gflib.sort_mutation_types(mutypes)
-		all_mutation_configurations = list(gflib.return_mutype_configs(max_k))
+		all_mutation_configurations = list(mutations.return_mutype_configs(max_k))
 		root = tuple(0 for _ in max_k)
-		self.mutype_tree = gflib.make_mutype_tree(all_mutation_configurations, root, max_k)
+		self.mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)
 
 	def evaluate_gf(self, parameter_dict, theta):
 		rate_dict = {branchtype:theta for branchtype in self.ordered_mutype_list}
 		gf = sum(self.gf).subs(parameter_dict)
-		ETPs = gflib.make_result_dict_from_mutype_tree_stack(
+		ETPs = mutations.make_result_dict_from_mutype_tree_stack(
 			gf, 
 			self.mutype_tree, 
 			theta, rate_dict, 
 			self.ordered_mutype_list, 
 			self.max_k
 			)
-		ETPs = gflib.dict_to_array(ETPs, (4,4,4,4))
-		ETPs = gflib.adjust_marginals_array(ETPs, len(self.max_k))
+		ETPs = mutations.dict_to_array(ETPs, (4,4,4,4))
+		ETPs = mutations.adjust_marginals_array(ETPs, len(self.max_k))
 		return ETPs.astype(np.float64)
 
 	def validate_parameters(self, parameter_dict, mutypes):

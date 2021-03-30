@@ -182,9 +182,8 @@ class Test_divide_into_equivalence_classes:
 
 @pytest.mark.gimble
 class Test_to_gimble:
-	#@pytest.mark.parametrize('model', [('IM_AB'), ('DIV'), ('MIG_BA')])
-	def test_ETPs(self):
-		model = 'IM_AB'
+	@pytest.mark.parametrize('model', [('IM_AB'), ('DIV'), ('MIG_BA')])
+	def test_ETPs(self, model):
 		ETPs = self.calculate_ETPs(model)
 		self.compare_ETPs_model(model, ETPs)
 
