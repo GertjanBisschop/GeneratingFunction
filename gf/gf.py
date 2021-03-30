@@ -1,18 +1,14 @@
-import sage.all
-import numpy as np
-import itertools
-import string
 import collections
-import itertools
-import operator
-import functools
 import copy
-import sys
-import networkx as nx
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import functools
+import itertools
 import multiprocessing
+import numpy as np
+import operator
+import sage.all
+import string
+import sys
+
 from timeit import default_timer as timer
 
 #auxilliary functions
@@ -57,28 +53,34 @@ def coalesce_single_pop(pop_state):
 		yield (count, result)
 
 #dealing with mutation/branchtypes
-def make_branchtype_dict(sample_list, mapping='unrooted'):
+def make_branchtype_dict(sample_list, mapping='unrooted', labels=None):
 	'''Maps lineages to their respective mutation type
 	Mappings: 'unrooted', 'label'
 	'''
 	all_branchtypes=list(flatten(sample_list))
 	branches = [branchtype for branchtype in powerset(all_branchtypes) if len(branchtype)>0 and len(branchtype)<len(all_branchtypes)]	
 	if mapping.startswith('label'):
-		branchtype_dict = {branchtype:sage.all.var(f'z_{branchtype}') for branchtype in set(branches)}
+		if labels:
+			assert len(branches)==len(labels), "number of labels does not match number of branchtypes"
+			branchtype_dict = {branchtype:sage.all.var(label) for branchtype, label in zip(branches, labels)}
+		else:
+			branchtype_dict = {branchtype:sage.all.var(f'z_{branchtype}') for branchtype in branches}
 	elif mapping=='unrooted': #this needs to be extended to the general thing!
+		if not labels:
+			labels = ['m_1', 'm_2', 'm_3', 'm_4']
 		assert set(all_branchtypes)=={'a', 'b'}
 		branchtype_dict=dict()
 		for branchtype in powerset(all_branchtypes):
 			if len(branchtype)==0 or len(branchtype)==len(all_branchtypes):
 				pass
 			elif branchtype in ('abb', 'a'):
-				branchtype_dict[branchtype] = sage.all.var('m_2') #hetA
+				branchtype_dict[branchtype] = sage.all.var(labels[1]) #hetA
 			elif branchtype in ('aab', 'b'):
-				branchtype_dict[branchtype] = sage.all.var('m_1') #hetB
+				branchtype_dict[branchtype] = sage.all.var(labels[0]) #hetB
 			elif branchtype == 'ab':
-				branchtype_dict[branchtype] = sage.all.var('m_3') #hetAB
+				branchtype_dict[branchtype] = sage.all.var(labels[2]) #hetAB
 			else:
-				branchtype_dict[branchtype] = sage.all.var('m_4') #fixed difference
+				branchtype_dict[branchtype] = sage.all.var(labels[3]) #fixed difference
 	else:
 		ValueError("This branchtype mapping has not been implemented yet.")
 	return branchtype_dict
@@ -86,7 +88,7 @@ def make_branchtype_dict(sample_list, mapping='unrooted'):
 def sort_mutation_types(branchtypes):
 	if isinstance(branchtypes, dict):
 		return sorted(set(branchtypes.values()), key= lambda x: str(x))
-	elif isinstance(branchtypes, list):
+	elif isinstance(branchtypes, list) or isinstance(branchtypes, tuple):
 		return sorted(set(branchtypes), key= lambda x: str(x))
 	else:
 		raise ValueError(f'sort_mutation_types not implemented for {type(branchtypes)}')
@@ -308,17 +310,6 @@ def dict_to_array(result_dict, shape):
 	result = np.zeros(shape, dtype=object)
 	result[tuple(zip(*result_dict.keys()))] = list(result_dict.values())
 	return result
-
-def make_graph(all_paths, name):
-	G = nx.DiGraph()
-	counter = 0
-	mapping_dict = {}
-	for single_path in all_paths:
-		#in single path, all elements ((),(),('a','a'))
-		single_path_str = ['/'.join(','.join(e  if len(line)>0 else X for e in line) for line in pop[1]) for pop in single_path]
-		G.add_edges_from(zip(single_path_str[:-1], single_path_str[1:]))
-	nx.draw_spring(G, with_labels=True)
-	plt.savefig(f"{name}.png")
 
 #using fast_callable
 def ar_to_fast_callable(ar, variables):
