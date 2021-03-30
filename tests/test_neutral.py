@@ -1,5 +1,6 @@
 import pytest
 import gf.gf as gflib
+import gf.togimble as tg
 from timeit import default_timer as timer
 import sage.all
 import numpy as np
@@ -18,7 +19,7 @@ all_configs = {
 					'reference_pop': 'A_B'
 					},
 		"sim_configs": [{'Ne_A': 1.3e6 , 'Ne_B': 6e5, 'Ne_A_B': 1.5e6, 'T': 1e7, 'me_A_B':7e-7, 'recombination':0}],
-		"gf_vars": {'migration_rate':sage.all.var('M'), 'migration_direction':[(1,2)], 'exodus_rate':sage.all.var('E'), 'exodus_direction':[(1,2,0)], 'ancestral_pop': 0}
+		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'migration_rate':sage.all.var('M'), 'migration_direction':[(1,2)], 'exodus_rate':sage.all.var('E'), 'exodus_direction':[(1,2,0)], 'ancestral_pop': 0}
 		},
 	'DIV' : {
 		"global_info" : {
@@ -31,7 +32,7 @@ all_configs = {
 					'reference_pop': 'A_B'
 					},
 		"sim_configs": [{'Ne_A': 1.3e6 , 'Ne_B': 6e5, 'Ne_A_B': 1.5e6, 'T': 1e7, 'recombination':0}],
-		"gf_vars": {'exodus_rate':sage.all.var('E'), 'exodus_direction':[(1,2,0)], 'ancestral_pop': 0}
+		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'exodus_rate':sage.all.var('E'), 'exodus_direction':[(1,2,0)], 'ancestral_pop': 0}
 		},
 	'MIG_BA' : {
 		"global_info" : {
@@ -44,7 +45,7 @@ all_configs = {
 					'reference_pop': 'A'
 					},
 		"sim_configs": [{'Ne_A': 1.3e6 , 'Ne_B': 6e5, 'me_B_A':7e-7, 'recombination':0}],
-		"gf_vars": {'migration_rate':sage.all.var('M'), 'migration_direction':[(2,1)], 'ancestral_pop': 1}
+		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'migration_rate':sage.all.var('M'), 'migration_direction':[(2,1)], 'ancestral_pop': 1}
 		}
 	}
 
@@ -161,14 +162,6 @@ class Test_gf_simple:
 		gflib.adjust_marginals_array(result, len(ordered_mutype_list))
 		assert np.allclose(result, check)
 		
-	#def adjust_marginals(self, result, num_mutypes):
-	#	print(result)
-	#	final_result = gflib.adjust_marginals(result, num_mutypes)
-	#	assert np.sum(final_result) == 1
-	#	marginals = np.sum(result[:,:-1],axis=1)+final_result[:,-1]
-	#	marginals[-1] = 1
-	#	assert np.allclose(marginals, result[:,-1])
-		
 	def test_probK(self):
 		ordered_mutype_list = [sage.all.var('z_a'), sage.all.var('z_b')]
 		theta = sage.all.var('theta')/2
@@ -182,79 +175,33 @@ class Test_gf_simple:
 		#test probability of seeing 1 mutation on each branch
 		assert probk == 1/2*(2*theta)**2/(2*theta+1)**3
 
-@pytest.mark.gimble
-class Test_gf_against_gimble:
-	def generate_gf(self, sample_list, branchtype_dict, global_info, sim_configs, gf_vars):
-		sim_config = sim_configs[0]
-		exodus_rate = sage.all.var('E') if sim_config.get('T') else None
-		migration_rate = sage.all.var('M') if sim_config.get('me_A_B') or sim_config.get('me_B_A') else None
-		coalescence_rates = (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2'))
-		gfobj = gflib.GFObject(
-			sample_list, 
-			coalescence_rates, 
-			branchtype_dict, 
-			migration_rate=migration_rate, 
-			migration_direction=gf_vars.get('migration_direction'), 
-			exodus_rate=exodus_rate, 
-			exodus_direction=gf_vars.get('exodus_direction')
-			)
-		return gfobj
-
-	def generate_ETPs(self, gfobj, branchtype_dict, max_k, global_info, sim_configs, gf_vars):
-		gf = gfobj.make_gf()
-		sim_config = sim_configs[0]
-		ordered_mutype_list = gflib.sort_mutation_types(branchtype_dict)
-		theta_symbolic = sage.all.var('theta')
-		theta = self.get_theta(global_info, sim_config)
-		parameter_dict = self.get_parameter_dict(global_info, sim_config, gf_vars, gfobj.coalescence_rates)
-		all_mutation_configurations = list(gflib.return_mutype_configs(max_k))
-		root = tuple(0 for _ in max_k)
-		mutype_tree = gflib.make_mutype_tree(all_mutation_configurations, root, max_k)
-		prob_array = gflib.make_prob_array(gf, mutype_tree, ordered_mutype_list, max_k, theta, gfobj.exodus_rate, chunksize=100, num_processes=1, adjust_marginals=True, parameter_dict=parameter_dict)
-		prob_array = prob_array.astype(np.float64)
-		return prob_array
-
-	def get_parameter_dict(self, global_info, sim_config, gf_vars, coalescence_rates):
-		parameter_dict = {}
-		reference_pop = global_info['reference_pop']
-		if gf_vars.get('migration_rate'):
-			migration_string = 'me_A_B' if gf_vars['migration_direction'] == [(1,2)] else 'me_B_A'
-			parameter_dict[gf_vars['migration_rate']] = sage.all.Rational(2 * sim_config[migration_string] * sim_config[f'Ne_{reference_pop}'])
-		if gf_vars.get('exodus_rate'):
-			parameter_dict[sage.all.var('T')] = sage.all.Rational(sim_config['T']/(2*sim_config[f'Ne_{reference_pop}']))
-		for c, Ne in zip(coalescence_rates,('Ne_A_B', 'Ne_A', 'Ne_B')):
-			if Ne in sim_config:
-				parameter_dict[c] = sage.all.Rational(sim_config[f'Ne_{reference_pop}']/sim_config[Ne])
-			else:
-				parameter_dict[c] = 0.0
-		return parameter_dict
-
-	def get_theta(self, global_info, sim_config):
-		reference_pop = global_info['reference_pop']
-		Ne_ref = sim_config[f'Ne_{reference_pop}']
-		mu=global_info['mu']
-		block_length = global_info['blocklength']
-		return 2*sage.all.Rational(Ne_ref*mu)*block_length
-
-	def compare_ETPs_model(self, config, ETPs_to_test):
-		gimbled_ETPs = np.squeeze(np.load(f'tests/ETPs/{config}.npy'))
-		print('test_ETPs:', ETPs_to_test[0,0,0,0])
-		print('gimble:', gimbled_ETPs[0,0,0,0])
-		assert np.all(np.isclose(gimbled_ETPs, ETPs_to_test))
-
-	#@pytest.mark.parametrize('config', [('IM_AB'),('DIV'), ('MIG_BA')])
-	def test_ETPs(self):
-		config='DIV' #DIV, MIG_BA or IM_AB
-		sample_list = [(),('a','a'),('b','b')]
-		branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='unrooted')
-		max_k = (2,2,2,2)
-		test = Test_gf_against_gimble()
-		gfobj = test.generate_gf(sample_list, branchtype_dict, **all_configs[config])
-		ETPs_to_test = test.generate_ETPs(gfobj, branchtype_dict, max_k, **all_configs[config])
-		test.compare_ETPs_model(config, ETPs_to_test)
-
 @pytest.mark.topology
 class Test_divide_into_equivalence_classes:
-	def test_basic(self):
-		
-		assert False
+	def no_test_basic(self):
+		pass
+
+@pytest.mark.gimble
+class Test_to_gimble:
+	@pytest.mark.parametrize('model', [('IM_AB'), ('DIV'), ('MIG_BA')])
+	def test_ETPs(self, model):
+		ETPs = self.calculate_ETPs(model)
+		self.compare_ETPs_model(model, ETPs)
+
+	def calculate_ETPs(self, model):
+		config = all_configs[model]
+		config['sim_config'] = config['sim_configs'][0]
+		del config['sim_configs']
+		joined_config = {**config['sim_config'], **config['gf_vars'], **config['global_info']}
+		gf = tg.get_gf(joined_config)
+		max_k = (2,2,2,2)
+		mutype_labels = config['global_info']['k_max'].keys()
+		mutypes = [sage.all.var(mutype) for mutype in mutype_labels]
+		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutypes)
+		coalescence_rates = (sage.all.var(c) for c in ['c0', 'c1', 'c2'])
+		parameter_dict = af.get_parameter_dict(coalescence_rates, **config)
+		theta = af.get_theta(**config)
+		return gfEvaluatorObj.evaluate_gf(parameter_dict, theta)
+
+	def compare_ETPs_model(self, model, ETPs):
+		gimbled_ETPs = np.squeeze(np.load(f'tests/ETPs/{model}.npy'))
+		assert np.all(np.isclose(gimbled_ETPs, ETPs))
