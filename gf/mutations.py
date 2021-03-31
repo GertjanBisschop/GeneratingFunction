@@ -124,7 +124,6 @@ def symbolic_prob_per_term(gf_term, mutype_tree, shape, theta, rate_dict, ordere
 	return result_array
 
 def process_grouped_terms(gf_terms, dummy_variable, mutype_tree, shape, rate_dict, theta, ordered_mutype_list, max_k, adjust_marginals, parameter_dict):
-	start_time=timer()
 	if dummy_variable:
 		gf_to_use = sum(gflib.inverse_laplace(gf_terms, dummy_variable))
 	else:
@@ -132,7 +131,6 @@ def process_grouped_terms(gf_terms, dummy_variable, mutype_tree, shape, rate_dic
 	if parameter_dict:
 		gf_to_use = gf_to_use.subs(parameter_dict)
 	result = symbolic_prob_per_term(gf_to_use, mutype_tree, shape, theta, rate_dict, ordered_mutype_list, max_k, adjust_marginals) 
-	print(timer()-start_time)
 	return result
 
 def make_prob_array(gf, mutype_tree, ordered_mutype_list, max_k, theta, dummy_variable, chunksize=100, num_processes=1, adjust_marginals=False, parameter_dict=None):

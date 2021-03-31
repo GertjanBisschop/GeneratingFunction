@@ -1,11 +1,15 @@
-import pytest
-import gf.gf as gflib
-import gf.togimble as tg
-from timeit import default_timer as timer
-import sage.all
 import numpy as np
-import tests.aux_functions as af
+import pytest
+import sage.all
 import sys, os
+
+from timeit import default_timer as timer
+
+import gf.gf as gflib
+import gf.mutations as mutations
+import gf.togimble as tg
+import tests.aux_functions as af
+
 
 all_configs = {
 	'IM_AB': {
@@ -152,14 +156,17 @@ class Test_gf_simple:
 			)
 		gf=gfobj.make_gf()
 		ordered_mutype_list = gflib.sort_mutation_types(branchtype_dict)
-		kmax_by_mutype=(2,2)
-		symbolic_prob_array =  gflib.make_prob_array(gf, ordered_mutype_list, kmax_by_mutype, theta, dummy_variable=None, chunksize=100, num_processes=1, adjust_marginals=False)
-		result = gflib.evaluate_ar(symbolic_prob_array, {})
+		max_k=(2,2)
+		all_mutation_configurations = list(mutations.return_mutype_configs(max_k))
+		root = tuple(0 for _ in max_k)
+		mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)
+		symbolic_prob_array =  mutations.make_prob_array(gf, mutype_tree, ordered_mutype_list, max_k, theta, dummy_variable=None, chunksize=100, num_processes=1, adjust_marginals=False)
+		result = mutations.evaluate_ar(symbolic_prob_array, {})
 		check = np.array([[0.5, 0.125,0.03125,0.66666667],
  				[0.125, 0.0625, 0.0234375, 0.22222222],
  				[0.03125, 0.0234375, 0.01171875, 0.07407407],
  				[0.66666667, 0.22222222, 0.07407407, 1]])
-		gflib.adjust_marginals_array(result, len(ordered_mutype_list))
+		#mutations.adjust_marginals_array(result, len(ordered_mutype_list))
 		assert np.allclose(result, check)
 		
 	def test_probK(self):
@@ -171,9 +178,38 @@ class Test_gf_simple:
 		ratedict = {mutype:theta for mutype in ordered_mutype_list}
 		mucount_total = 2
 		mucount_fact_prod = 1 
-		probk = gflib.simple_probK(gf, theta, partials, marginals, ratedict, mucount_total, mucount_fact_prod)
+		probk = mutations.simple_probK(gf, theta, partials, marginals, ratedict, mucount_total, mucount_fact_prod)
 		#test probability of seeing 1 mutation on each branch
 		assert probk == 1/2*(2*theta)**2/(2*theta+1)**3
+
+@pytest.mark.zero_division
+class Test_zero_division:
+	def test_zero_div(self):
+		config = {
+			'sample_list' :[(),('a','a'),('b','b')], 
+			'coalescence_rates': (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2')),
+			'k_max': {'m_1':2, 'm_2':2, 'm_3':2, 'm_4':2},
+			'migration_rate':sage.all.var('M'), 
+			'migration_direction':[(1,2)], 
+			'exodus_rate':sage.all.var('E'), 
+			'exodus_direction':[(1,2,0)]
+			}
+		max_k = (2,2,2,2)
+		mutype_labels = list(config['k_max'].keys())
+		mutypes = [sage.all.var(mutype) for mutype in mutype_labels]
+		coal_rates_values = {c:sage.all.Rational(v) for c,v in zip(config['coalescence_rates'], (3,1,3))}
+		parameter_dict = {
+			sage.all.var('M'):sage.all.Rational(2),
+			sage.all.var('T'):sage.all.Rational(1)
+			}
+		parameter_dict = {**parameter_dict, **coal_rates_values}
+		theta = sage.all.Rational(1)
+		epsilon = sage.all.Rational(0.00001)
+		gf = list(tg.get_gf(**config))
+		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutypes)
+		
+		result = gfEvaluatorObj.evaluate_gf(parameter_dict, theta)
+		assert np.all(result>=0)
 
 @pytest.mark.topology
 class Test_divide_into_equivalence_classes:
@@ -191,13 +227,25 @@ class Test_to_gimble:
 		config = all_configs[model]
 		config['sim_config'] = config['sim_configs'][0]
 		del config['sim_configs']
-		joined_config = {**config['sim_config'], **config['gf_vars'], **config['global_info']}
-		gf = tg.get_gf(joined_config)
+		coalescence_rates = tuple(sage.all.var(c) for c in ['c0', 'c1', 'c2'])
+		migration_rate = config['gf_vars'].get('migration_rate')
+		migration_direction = config['gf_vars'].get('migration_direction')
+		exodus_rate = config['gf_vars'].get('exodus_rate')
+		exodus_direction = config['gf_vars'].get('exodus_direction')
+		
+		gf = tg.get_gf(
+			config['gf_vars']['sample_list'], 
+			coalescence_rates, 
+			config['global_info']['k_max'],
+			migration_direction = migration_direction,
+			migration_rate = migration_rate,
+			exodus_direction = exodus_direction,
+			exodus_rate = exodus_rate
+			)
 		max_k = (2,2,2,2)
 		mutype_labels = config['global_info']['k_max'].keys()
 		mutypes = [sage.all.var(mutype) for mutype in mutype_labels]
 		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutypes)
-		coalescence_rates = (sage.all.var(c) for c in ['c0', 'c1', 'c2'])
 		parameter_dict = af.get_parameter_dict(coalescence_rates, **config)
 		theta = af.get_theta(**config)
 		return gfEvaluatorObj.evaluate_gf(parameter_dict, theta)
