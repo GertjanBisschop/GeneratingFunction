@@ -4,12 +4,8 @@ import sage.all
 from . import gf as gflib
 from . import mutations
 
-def _get_gfObj(config):
-	sample_list = config['sample_list']
-	exodus_rate = sage.all.var('E') if config.get('T') else None
-	migration_rate = sage.all.var('M') if config.get('me_A_B') or config.get('me_B_A') else None
-	coalescence_rates = (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2'))
-	labels = gflib.sort_mutation_types(list(config["k_max"].keys()))
+def _get_gfObj(sample_list, coalescence_rates, k_max, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
+	labels = gflib.sort_mutation_types(list(k_max.keys()))
 	branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='unrooted', labels=labels)
 
 	gfobj = gflib.GFObject(
@@ -17,9 +13,9 @@ def _get_gfObj(config):
 		coalescence_rates, 
 		branchtype_dict, 
 		migration_rate=migration_rate, 
-		migration_direction=config.get('migration_direction'), 
+		migration_direction=migration_direction, 
 		exodus_rate=exodus_rate, 
-		exodus_direction=config.get('exodus_direction')
+		exodus_direction=exodus_direction
 		)
 	return gfobj
 
@@ -29,8 +25,8 @@ def _return_inverse_laplace(gfobj, gf):
 	else:
 		return list(gf)
 
-def get_gf(config):
-	gfobj = _get_gfObj(config)
+def get_gf(sample_list, coalescence_rates, k_max, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
+	gfobj = _get_gfObj(sample_list, coalescence_rates, k_max, migration_direction, migration_rate, exodus_direction, exodus_rate)
 	gf = gfobj.make_gf()
 	return _return_inverse_laplace(gfobj, gf)
 
@@ -43,9 +39,16 @@ class gfEvaluator:
 		root = tuple(0 for _ in max_k)
 		self.mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)
 
-	def evaluate_gf(self, parameter_dict, theta):
+	def evaluate_gf(self, parameter_dict, theta, epsilon=0.0001):
 		rate_dict = {branchtype:theta for branchtype in self.ordered_mutype_list}
-		gf = sum(self.gf).subs(parameter_dict)
+		try:
+			gf = sum(self.gf).subs(parameter_dict)
+		except ValueError as e:
+			if 'division by zero' in str(e):
+				epsilon = sage.all.Rational(epsilon)
+				M = sage.all.var('M')
+				parameter_dict[M] += parameter_dict[M]*epsilon
+				gf = sum(self.gf).subs(parameter_dict)
 		ETPs = mutations.make_result_dict_from_mutype_tree_stack(
 			gf, 
 			self.mutype_tree, 
@@ -55,6 +58,8 @@ class gfEvaluator:
 			)
 		ETPs = mutations.dict_to_array(ETPs, (4,4,4,4))
 		ETPs = mutations.adjust_marginals_array(ETPs, len(self.max_k))
+		if not np.all(ETPs>0):
+			ETPs[ETPs<0] = 0 
 		return ETPs.astype(np.float64)
 
 	def validate_parameters(self, parameter_dict, mutypes):
