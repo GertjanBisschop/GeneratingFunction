@@ -4,9 +4,10 @@ import sage.all
 from . import gf as gflib
 from . import mutations
 
-def _get_gfObj(sample_list, coalescence_rates, k_max, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
-	labels = gflib.sort_mutation_types(list(k_max.keys()))
-	branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='unrooted', labels=labels)
+def _get_gfObj(sample_list, coalescence_rates, mutype_labels, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
+	#labels = gflib.sort_mutation_types(list(k_max.keys()))
+	#labels = sorted_mutypes
+	branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='unrooted', labels=mutype_labels)
 
 	gfobj = gflib.GFObject(
 		sample_list, 
@@ -25,8 +26,8 @@ def _return_inverse_laplace(gfobj, gf):
 	else:
 		return list(gf)
 
-def get_gf(sample_list, coalescence_rates, k_max, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
-	gfobj = _get_gfObj(sample_list, coalescence_rates, k_max, migration_direction, migration_rate, exodus_direction, exodus_rate)
+def get_gf(sample_list, coalescence_rates, mutype_labels, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
+	gfobj = _get_gfObj(sample_list, coalescence_rates, mutype_labels, migration_direction, migration_rate, exodus_direction, exodus_rate)
 	gf = gfobj.make_gf()
 	return _return_inverse_laplace(gfobj, gf)
 
@@ -34,7 +35,7 @@ class gfEvaluator:
 	def __init__(self, gf, max_k, mutypes):
 		self.gf = gf
 		self.max_k = max_k
-		self.ordered_mutype_list = gflib.sort_mutation_types(mutypes)
+		self.ordered_mutype_list = [sage.all.var(mutype) for mutype in mutypes]
 		all_mutation_configurations = list(mutations.return_mutype_configs(max_k))
 		root = tuple(0 for _ in max_k)
 		self.mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)

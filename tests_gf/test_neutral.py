@@ -8,7 +8,7 @@ from timeit import default_timer as timer
 import gf.gf as gflib
 import gf.mutations as mutations
 import gf.togimble as tg
-import tests.aux_functions as af
+import tests_gf.aux_functions as af
 
 
 all_configs = {
@@ -194,9 +194,7 @@ class Test_zero_division:
 			'exodus_rate':sage.all.var('E'), 
 			'exodus_direction':[(1,2,0)]
 			}
-		max_k = (2,2,2,2)
-		mutype_labels = list(config['k_max'].keys())
-		mutypes = [sage.all.var(mutype) for mutype in mutype_labels]
+		mutype_labels, max_k = zip(*sorted(config['k_max'].items()))
 		coal_rates_values = {c:sage.all.Rational(v) for c,v in zip(config['coalescence_rates'], (3,1,3))}
 		parameter_dict = {
 			sage.all.var('M'):sage.all.Rational(2),
@@ -205,9 +203,10 @@ class Test_zero_division:
 		parameter_dict = {**parameter_dict, **coal_rates_values}
 		theta = sage.all.Rational(1)
 		epsilon = sage.all.Rational(0.00001)
+		config['mutype_labels'] = mutype_labels
+		del config['k_max'] 
 		gf = list(tg.get_gf(**config))
-		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutypes)
-		
+		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutype_labels)		
 		result = gfEvaluatorObj.evaluate_gf(parameter_dict, theta)
 		assert np.all(result>=0)
 
@@ -232,24 +231,21 @@ class Test_to_gimble:
 		migration_direction = config['gf_vars'].get('migration_direction')
 		exodus_rate = config['gf_vars'].get('exodus_rate')
 		exodus_direction = config['gf_vars'].get('exodus_direction')
-		
+		mutype_labels, max_k = zip(*sorted(config['global_info']['k_max'].items()))
 		gf = tg.get_gf(
 			config['gf_vars']['sample_list'], 
 			coalescence_rates, 
-			config['global_info']['k_max'],
+			mutype_labels,
 			migration_direction = migration_direction,
 			migration_rate = migration_rate,
 			exodus_direction = exodus_direction,
 			exodus_rate = exodus_rate
 			)
-		max_k = (2,2,2,2)
-		mutype_labels = config['global_info']['k_max'].keys()
-		mutypes = [sage.all.var(mutype) for mutype in mutype_labels]
-		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutypes)
+		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutype_labels)
 		parameter_dict = af.get_parameter_dict(coalescence_rates, **config)
 		theta = af.get_theta(**config)
 		return gfEvaluatorObj.evaluate_gf(parameter_dict, theta)
 
 	def compare_ETPs_model(self, model, ETPs):
-		gimbled_ETPs = np.squeeze(np.load(f'tests/ETPs/{model}.npy'))
+		gimbled_ETPs = np.squeeze(np.load(f'tests_gf/ETPs/{model}.npy'))
 		assert np.all(np.isclose(gimbled_ETPs, ETPs))
