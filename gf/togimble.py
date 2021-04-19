@@ -32,14 +32,15 @@ def get_gf(sample_list, coalescence_rates, mutype_labels, migration_direction=No
 	return _return_inverse_laplace(gfobj, gf)
 
 class gfEvaluator:
-	def __init__(self, gf, max_k, mutypes):
+	def __init__(self, gf, max_k, mutypes, precision=165):
 		self.gf = gf
 		self.max_k = max_k
 		self.ordered_mutype_list = [sage.all.var(mutype) for mutype in mutypes]
 		all_mutation_configurations = list(mutations.return_mutype_configs(max_k))
 		root = tuple(0 for _ in max_k)
 		self.mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)
-
+		self.precision = precision
+		
 	def evaluate_gf(self, parameter_dict, theta, epsilon=0.0001):
 		rate_dict = {branchtype:theta for branchtype in self.ordered_mutype_list}
 		try:
@@ -55,7 +56,8 @@ class gfEvaluator:
 			self.mutype_tree, 
 			theta, rate_dict, 
 			self.ordered_mutype_list, 
-			self.max_k
+			self.max_k,
+			self.precision
 			)
 		ETPs = mutations.dict_to_array(ETPs, (4,4,4,4))
 		ETPs = mutations.adjust_marginals_array(ETPs, len(self.max_k))
