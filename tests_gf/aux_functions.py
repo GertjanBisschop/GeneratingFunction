@@ -1,35 +1,10 @@
 import numpy as np
 import os
-import sage.all
 import scipy.stats as stats
 
 import matplotlib
 import matplotlib.pyplot as plt
 matplotlib.use("Agg")
-
-
-def sim_combi_gt_matrix(p=2, s=2, alleles=[0, 1]):
-    '''
-    generates numpy-genotype-array all possible combinations of elements in `alleles`
-    WARNING: only works for (p*s)<30 
-    ''' 
-    arrays = p*s*[np.array(alleles)]
-    la = len(arrays)
-    dtype = np.result_type(*arrays)
-    arr = np.empty([len(a) for a in arrays] + [la], dtype=dtype)
-    for i, a in enumerate(np.ix_(*arrays)):
-        arr[...,i] = a
-    return arr.reshape(-1, s, p)
-
-def sim_random_gt_matrix(p=2, s=2, n=10, alleles=[0, 1]):
-    '''generates random numpy-genotype-array with `n` genotypes''' 
-    rng = np.random.default_rng(12345)
-    return rng.choice(alleles, size=(n,s,p))
-
-def sim_sites(n):
-    '''draws n integers from (0, n)'''
-    rng = np.random.default_rng()
-    return np.unique(np.sort(rng.integers(low=0, high=n, size=n)))
 
 def chisquare(observed, expected, p_th=0.05, recombination=False, all_sims=False):
     #expected counts need to be larger than 5 for chisquare
@@ -100,42 +75,7 @@ def scatter_loglog(observed, expected, name, xlabel='gimble', ylabel='to_test'):
     ax.figure.savefig(f'tests/output/scatter_{name}.png', dpi=300)
     plt.clf()
 
-def sim_ETPs(global_info, sim_configs, n, blocks, chunks, replicates):
-        threads = 1
-        add_global_info = {
-                            'blocks':blocks, 
-                            'chunks':chunks, 
-                            'sample_pop_sizes':[n for _ in global_info['sample_pop_ids']],
-                            'replicates':replicates
-                            }
-        all_interpop_comparisons = lib.simulate.all_interpopulation_comparisons(*add_global_info['sample_pop_sizes'])
-        sim_global_info = {**global_info, **add_global_info}
-        simmed_ETPs = lib.simulate.run_sims(sim_configs, sim_global_info, all_interpop_comparisons, chunks, threads, disable_tqdm=True)
-        return simmed_ETPs
-
 def downsample(A, N):
     distribution = [i for i, j in enumerate(A) for _ in range(j)]
     sample = Counter(random.sample(distribution, N))
     return [sample[i] for i in range(len(A))]
-
-def get_parameter_dict(coalescence_rates, global_info, sim_config, gf_vars):
-    parameter_dict = {}
-    reference_pop = global_info['reference_pop']
-    if gf_vars.get('migration_rate'):
-        migration_string = 'me_A_B' if gf_vars['migration_direction'] == [(1,2)] else 'me_B_A'
-        parameter_dict[gf_vars['migration_rate']] = sage.all.Rational(2 * sim_config[migration_string] * sim_config[f'Ne_{reference_pop}'])
-    if gf_vars.get('exodus_rate'):
-        parameter_dict[sage.all.var('T')] = sage.all.Rational(sim_config['T']/(2*sim_config[f'Ne_{reference_pop}']))
-    for c, Ne in zip(coalescence_rates,('Ne_A_B', 'Ne_A', 'Ne_B')):
-        if Ne in sim_config:
-            parameter_dict[c] = sage.all.Rational(sim_config[f'Ne_{reference_pop}']/sim_config[Ne])
-        else:
-            parameter_dict[c] = 0.0
-    return parameter_dict
-
-def get_theta(global_info, sim_config, **kwargs):
-    reference_pop = global_info['reference_pop']
-    Ne_ref = sim_config[f'Ne_{reference_pop}']
-    mu=global_info['mu']
-    block_length = global_info['blocklength']
-    return 2*sage.all.Rational(Ne_ref*mu)*block_length

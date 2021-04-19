@@ -191,7 +191,7 @@ class Test_zero_division:
 			'k_max': {'m_1':2, 'm_2':2, 'm_3':2, 'm_4':2},
 			'migration_rate':sage.all.var('M'), 
 			'migration_direction':[(1,2)], 
-			'exodus_rate':sage.all.var('E'), 
+			'exodus_rate':sage.all.var('E'),
 			'exodus_direction':[(1,2,0)]
 			}
 		mutype_labels, max_k = zip(*sorted(config['k_max'].items()))

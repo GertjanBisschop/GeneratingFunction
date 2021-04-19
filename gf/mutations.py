@@ -29,7 +29,7 @@ def make_mutype_tree(all_mutypes, root, max_k):
 				result[root_config].append(mutype)
 	return result
 
-def make_result_dict_from_mutype_tree(gf, mutype_tree, theta, rate_dict, ordered_mutype_list, max_k):
+def make_result_dict_from_mutype_tree(gf, mutype_tree, theta, rate_dict, ordered_mutype_list, max_k, precision=165):
 	root = tuple(0 for _ in max_k)
 	result = {}
 	result[root] = probK_from_diff(gf, theta, rate_dict, root)
@@ -40,7 +40,7 @@ def make_result_dict_from_mutype_tree(gf, mutype_tree, theta, rate_dict, ordered
 			if any(m>max_k_m for m, max_k_m in zip(child, max_k)):
 				marginals = {branchtype:0 for branchtype, count, m_max_k in zip(ordered_mutype_list, child, max_k) if count>m_max_k}
 				child_mutype = tuple(m if m<=max_k_m else None for m, max_k_m in zip(child, max_k))
-				result[child] = sage.all.RealField(165)(probK_from_diff(intermediate_results[parent].subs(marginals), theta, rate_dict, child_mutype))
+				result[child] = sage.all.RealField(precision)(probK_from_diff(intermediate_results[parent].subs(marginals), theta, rate_dict, child_mutype))
 			else:
 				marginals = None
 				relative_config = [b-a for a,b in zip(parent, child)]
@@ -48,11 +48,11 @@ def make_result_dict_from_mutype_tree(gf, mutype_tree, theta, rate_dict, ordered
 				diff = sage.all.diff(intermediate_results[parent], partial)
 				if child in mutype_tree.keys():
 					intermediate_results[child] = diff
-				result[child] = sage.all.RealField(165)(probK_from_diff(diff, theta, rate_dict, child))
+				result[child] = sage.all.RealField(precision)(probK_from_diff(diff, theta, rate_dict, child))
 		del intermediate_results[parent] #once all children have been calculate no need to store original
 	return result
 
-def make_result_dict_from_mutype_tree_stack(gf, mutype_tree, theta, rate_dict, ordered_mutype_list, max_k):
+def make_result_dict_from_mutype_tree_stack(gf, mutype_tree, theta, rate_dict, ordered_mutype_list, max_k, precision=165):
 	root = tuple(0 for _ in max_k)
 	result = {}
 	stack = [root,]
@@ -73,20 +73,23 @@ def make_result_dict_from_mutype_tree_stack(gf, mutype_tree, theta, rate_dict, o
 			parent, parent_gf = root, gf
 			for child in mutype_tree[node]:
 					stack.append(child)
-		
-		#determine whether marginal probability or not
-		if any(m>max_k_m for m, max_k_m in zip(node, max_k)):
-				marginals = {branchtype:0 for branchtype, count, m_max_k in zip(ordered_mutype_list, node, max_k) if count>m_max_k}
-				node_mutype = tuple(m if m<=max_k_m else None for m, max_k_m in zip(node, max_k))
-				result[node] = sage.all.RealField(165)(probK_from_diff(parent_gf.subs(marginals), theta, rate_dict, node_mutype))
-		else:
-			marginals = None
-			relative_config = [b-a for a,b in zip(parent, node)]
-			partial = single_partial(ordered_mutype_list, relative_config)
-			diff = sage.all.diff(parent_gf, partial)
-			if node in mutype_tree:
-				path_parents.append((node, diff))
-			result[node] = sage.all.RealField(165)(probK_from_diff(diff, theta, rate_dict, node))
+		try:		
+			#determine whether marginal probability or not
+			if any(m>max_k_m for m, max_k_m in zip(node, max_k)):
+					marginals = {branchtype:0 for branchtype, count, m_max_k in zip(ordered_mutype_list, node, max_k) if count>m_max_k}
+					node_mutype = tuple(m if m<=max_k_m else None for m, max_k_m in zip(node, max_k))
+					result[node] = sage.all.RealField(precision)(probK_from_diff(parent_gf.subs(marginals), theta, rate_dict, node_mutype))
+			else:
+				marginals = None
+				relative_config = [b-a for a,b in zip(parent, node)]
+				partial = single_partial(ordered_mutype_list, relative_config)
+				diff = sage.all.diff(parent_gf, partial)
+				if node in mutype_tree:
+					path_parents.append((node, diff))
+				result[node] = sage.all.RealField(precision)(probK_from_diff(diff, theta, rate_dict, node))
+		except TypeError:
+			print(parent_gf)
+			sys.exit()
 	return result
 
 def differs_one_digit(query, complete_list):
