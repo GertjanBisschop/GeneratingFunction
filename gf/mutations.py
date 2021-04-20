@@ -72,24 +72,20 @@ def make_result_dict_from_mutype_tree_stack(gf, mutype_tree, theta, rate_dict, o
 		else:
 			parent, parent_gf = root, gf
 			for child in mutype_tree[node]:
-					stack.append(child)
-		try:		
-			#determine whether marginal probability or not
-			if any(m>max_k_m for m, max_k_m in zip(node, max_k)):
-					marginals = {branchtype:0 for branchtype, count, m_max_k in zip(ordered_mutype_list, node, max_k) if count>m_max_k}
-					node_mutype = tuple(m if m<=max_k_m else None for m, max_k_m in zip(node, max_k))
-					result[node] = sage.all.RealField(precision)(probK_from_diff(parent_gf.subs(marginals), theta, rate_dict, node_mutype))
-			else:
-				marginals = None
-				relative_config = [b-a for a,b in zip(parent, node)]
-				partial = single_partial(ordered_mutype_list, relative_config)
-				diff = sage.all.diff(parent_gf, partial)
-				if node in mutype_tree:
-					path_parents.append((node, diff))
-				result[node] = sage.all.RealField(precision)(probK_from_diff(diff, theta, rate_dict, node))
-		except TypeError:
-			print(parent_gf)
-			sys.exit()
+					stack.append(child)		
+		#determine whether marginal probability or not
+		if any(m>max_k_m for m, max_k_m in zip(node, max_k)):
+				marginals = {branchtype:0 for branchtype, count, m_max_k in zip(ordered_mutype_list, node, max_k) if count>m_max_k}
+				node_mutype = tuple(m if m<=max_k_m else None for m, max_k_m in zip(node, max_k))
+				result[node] = sage.all.RealField(precision)(probK_from_diff(parent_gf.subs(marginals), theta, rate_dict, node_mutype))
+		else:
+			marginals = None
+			relative_config = [b-a for a,b in zip(parent, node)]
+			partial = single_partial(ordered_mutype_list, relative_config)
+			diff = sage.all.diff(parent_gf, partial)
+			if node in mutype_tree:
+				path_parents.append((node, diff))
+			result[node] = sage.all.RealField(precision)(probK_from_diff(diff, theta, rate_dict, node))
 	return result
 
 def differs_one_digit(query, complete_list):
@@ -199,9 +195,8 @@ def _adjust_marginals_array(array, dimension, j):
 	new_idxs[np.transpose(idxs)]=np.arange(dimension, dtype=np.uint8)
 	return result.transpose(new_idxs)
 
-def dict_to_array(result_dict, shape):
-	#result = np.zeros(shape, dtype=np.float64)
-	result = np.zeros(shape, dtype=object)
+def dict_to_array(result_dict, shape, dtype=object):
+	result = np.zeros(shape, dtype=dtype)
 	result[tuple(zip(*result_dict.keys()))] = list(result_dict.values())
 	return result
 

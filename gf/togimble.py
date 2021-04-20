@@ -36,7 +36,11 @@ class gfEvaluator:
 		self.gf = gf
 		self.max_k = max_k
 		self.ordered_mutype_list = [sage.all.var(mutype) for mutype in mutypes]
-		all_mutation_configurations = list(mutations.return_mutype_configs(max_k))
+		#all_mutation_configurations = list(mutations.return_mutype_configs(max_k))
+		#all_mutation_configurations = [m for m in all_mutation_configurations if not(m[2]>0 and m[3]>0)]
+		exclude = [(2,3),]
+		all_mutation_configurations = mutations.return_mutype_configs(max_k)
+		all_mutation_configurations = [m for m in x if all(not(all(m[idx]>0 for idx in e)) for e in exclude)]
 		root = tuple(0 for _ in max_k)
 		self.mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)
 		self.precision = precision
@@ -59,11 +63,20 @@ class gfEvaluator:
 			self.max_k,
 			self.precision
 			)
-		ETPs = mutations.dict_to_array(ETPs, (4,4,4,4))
+		ETPs = mutations.dict_to_array(ETPs, (4,4,4,4), dtype=np.float64)
+		try:
+			assert np.all(np.logical_and(ETPs>=0, ETPs<=1))
+		except AssertionError:
+			print("[-] Some ETPs are not in [0,1]. Increase machine precision in the ini file.")
 		ETPs = mutations.adjust_marginals_array(ETPs, len(self.max_k))
 		if not np.all(ETPs>0):
-			ETPs[ETPs<0] = 0 
-		return ETPs.astype(np.float64)
+			ETPs[ETPs<0] = 0
+		ETPs = ETPs.astype(np.float64)
+		try:
+			assert np.isclose(np.sum(ETPs), 1.0, rtol=1e-4)
+		except AssertionError:
+			sys.exit(f"[-] sum(ETPs): {np.sum(ETPs)} != 1 (rel_tol=1e-4)")
+		return ETPs
 
 	def validate_parameters(self, parameter_dict, mutypes):
 		arguments = self.gf.arguments()
