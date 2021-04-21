@@ -32,11 +32,15 @@ def get_gf(sample_list, coalescence_rates, mutype_labels, migration_direction=No
 	return _return_inverse_laplace(gfobj, gf)
 
 class gfEvaluator:
-	def __init__(self, gf, max_k, mutypes, precision=165):
+	def __init__(self, gf, max_k, mutypes, precision=165, exclude=None):
 		self.gf = gf
 		self.max_k = max_k
-		self.ordered_mutype_list = [sage.all.var(mutype) for mutype in mutypes]
-		all_mutation_configurations = list(mutations.return_mutype_configs(max_k))
+		self.ordered_mutype_list = [sage.all.SR.var(mutype) for mutype in mutypes]
+		all_mutation_configurations = mutations.return_mutype_configs(max_k)
+		if exclude!=None:
+			all_mutation_configurations = [m for m in all_mutation_configurations if all(not(all(m[idx]>0 for idx in e)) for e in exclude)]
+		else:
+			all_mutation_configurations = list(all_mutation_configurations)
 		root = tuple(0 for _ in max_k)
 		self.mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)
 		self.precision = precision
@@ -48,7 +52,7 @@ class gfEvaluator:
 		except ValueError as e:
 			if 'division by zero' in str(e):
 				epsilon = sage.all.Rational(epsilon)
-				M = sage.all.var('M')
+				M = sage.all.SR.var('M')
 				parameter_dict[M] += parameter_dict[M]*epsilon
 				gf = sum(self.gf).subs(parameter_dict)
 		ETPs = mutations.make_result_dict_from_mutype_tree_stack(
@@ -59,11 +63,20 @@ class gfEvaluator:
 			self.max_k,
 			self.precision
 			)
-		ETPs = mutations.dict_to_array(ETPs, (4,4,4,4))
+		ETPs = mutations.dict_to_array(ETPs, (4,4,4,4), dtype=np.float64)
+		try:
+			assert np.all(np.logical_and(ETPs>=0, ETPs<=1))
+		except AssertionError:
+			print("[-] Some ETPs are not in [0,1]. Increase machine precision in the ini file.")
 		ETPs = mutations.adjust_marginals_array(ETPs, len(self.max_k))
 		if not np.all(ETPs>0):
-			ETPs[ETPs<0] = 0 
-		return ETPs.astype(np.float64)
+			ETPs[ETPs<0] = 0
+		ETPs = ETPs.astype(np.float64)
+		try:
+			assert np.isclose(np.sum(ETPs), 1.0, rtol=1e-4)
+		except AssertionError:
+			sys.exit(f"[-] sum(ETPs): {np.sum(ETPs)} != 1 (rel_tol=1e-4)")
+		return ETPs
 
 	def validate_parameters(self, parameter_dict, mutypes):
 		arguments = self.gf.arguments()

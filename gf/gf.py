@@ -61,9 +61,9 @@ def make_branchtype_dict(sample_list, mapping='unrooted', labels=None):
 	if mapping.startswith('label'):
 		if labels:
 			assert len(branches)==len(labels), "number of labels does not match number of branchtypes"
-			branchtype_dict = {branchtype:sage.all.var(label) for branchtype, label in zip(branches, labels)}
+			branchtype_dict = {branchtype:sage.all.SR.var(label) for branchtype, label in zip(branches, labels)}
 		else:
-			branchtype_dict = {branchtype:sage.all.var(f'z_{branchtype}') for branchtype in branches}
+			branchtype_dict = {branchtype:sage.all.SR.var(f'z_{branchtype}') for branchtype in branches}
 	elif mapping=='unrooted': #this needs to be extended to the general thing!
 		if not labels:
 			labels = ['m_1', 'm_2', 'm_3', 'm_4']
@@ -73,13 +73,13 @@ def make_branchtype_dict(sample_list, mapping='unrooted', labels=None):
 			if len(branchtype)==0 or len(branchtype)==len(all_branchtypes):
 				pass
 			elif branchtype in ('abb', 'a'):
-				branchtype_dict[branchtype] = sage.all.var(labels[1]) #hetA
+				branchtype_dict[branchtype] = sage.all.SR.var(labels[1]) #hetA
 			elif branchtype in ('aab', 'b'):
-				branchtype_dict[branchtype] = sage.all.var(labels[0]) #hetB
+				branchtype_dict[branchtype] = sage.all.SR.var(labels[0]) #hetB
 			elif branchtype == 'ab':
-				branchtype_dict[branchtype] = sage.all.var(labels[2]) #hetAB
+				branchtype_dict[branchtype] = sage.all.SR.var(labels[2]) #hetAB
 			else:
-				branchtype_dict[branchtype] = sage.all.var(labels[3]) #fixed difference
+				branchtype_dict[branchtype] = sage.all.SR.var(labels[3]) #fixed difference
 	else:
 		ValueError("This branchtype mapping has not been implemented yet.")
 	return branchtype_dict
@@ -122,12 +122,12 @@ class GFObject:
 		self.branchtype_dict = branchtype_dict
 		self.migration_direction = migration_direction
 		if migration_direction and not migration_rate:
-			self.migration_rate = sage.all.var('M') #set domain???
+			self.migration_rate = sage.all.SR.var('M') #set domain???
 		else:
 			self.migration_rate = migration_rate
 		self.exodus_direction = exodus_direction
 		if exodus_direction and not exodus_rate:
-			self.exodus_rate = sage.all.var('E') #set domain?
+			self.exodus_rate = sage.all.SR.var('E') #set domain?
 		else:
 			self.exodus_rate = exodus_rate
 
