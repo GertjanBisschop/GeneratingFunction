@@ -241,7 +241,7 @@ class Test_to_gimble:
 			exodus_direction = exodus_direction,
 			exodus_rate = exodus_rate
 			)
-		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutype_labels)
+		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutype_labels, exclude=[(2,3),])
 		parameter_dict = af.get_parameter_dict(coalescence_rates, **config)
 		theta = af.get_theta(**config)
 		return gfEvaluatorObj.evaluate_gf(parameter_dict, theta)
