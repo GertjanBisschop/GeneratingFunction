@@ -32,11 +32,14 @@ def get_gf(sample_list, coalescence_rates, mutype_labels, migration_direction=No
 	return _return_inverse_laplace(gfobj, gf)
 
 class gfEvaluator:
-	def __init__(self, gf, max_k, mutypes, precision=165, exclude=None):
+	def __init__(self, gf, max_k, mutypes, precision=165, exclude=None, restrict_to=None):
 		self.gf = gf
 		self.max_k = max_k
 		self.ordered_mutype_list = [sage.all.SR.var(mutype) for mutype in mutypes]
-		all_mutation_configurations = mutations.return_mutype_configs(max_k)
+		if restrict_to!=None:
+			all_mutation_configurations = mutations.add_marginals_restrict_to(restrict_to, max_k)
+		else:
+			all_mutation_configurations = mutations.return_mutype_configs(max_k)
 		if exclude!=None:
 			all_mutation_configurations = [m for m in all_mutation_configurations if all(not(all(m[idx]>0 for idx in e)) for e in exclude)]
 		else:
@@ -77,7 +80,3 @@ class gfEvaluator:
 		except AssertionError:
 			sys.exit(f"[-] sum(ETPs): {np.sum(ETPs)} != 1 (rel_tol=1e-4)")
 		return ETPs
-
-	def validate_parameters(self, parameter_dict, mutypes):
-		arguments = self.gf.arguments()
-		#theta presence
