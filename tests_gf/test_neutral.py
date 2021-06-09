@@ -184,7 +184,8 @@ class Test_gf_simple:
 
 @pytest.mark.zero_division
 class Test_zero_division:
-	def test_zero_div(self):
+	@pytest.fixture(scope='class')
+	def get_gf(self):
 		config = {
 			'sample_list' :[(),('a','a'),('b','b')], 
 			'coalescence_rates': (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2')),
@@ -195,7 +196,15 @@ class Test_zero_division:
 			'exodus_direction':[(1,2,0)]
 			}
 		mutype_labels, max_k = zip(*sorted(config['k_max'].items()))
-		coal_rates_values = {c:sage.all.Rational(v) for c,v in zip(config['coalescence_rates'], (3,1,3))}
+		config['mutype_labels'] = mutype_labels
+		del config['k_max'] 
+		gf = tg.get_gf(**config)
+		return (gf, mutype_labels, max_k)
+
+	def test_zero_div(self, get_gf):
+		gf, mutype_labels, max_k = get_gf 
+		coalescence_rates = (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2'))
+		coal_rates_values = {c:sage.all.Rational(v) for c,v in zip(coalescence_rates, (3,1,3))}
 		parameter_dict = {
 			sage.all.var('M'):sage.all.Rational(2),
 			sage.all.var('T'):sage.all.Rational(1)
@@ -203,12 +212,24 @@ class Test_zero_division:
 		parameter_dict = {**parameter_dict, **coal_rates_values}
 		theta = sage.all.Rational(1)
 		epsilon = sage.all.Rational(0.00001)
-		config['mutype_labels'] = mutype_labels
-		del config['k_max'] 
-		gf = list(tg.get_gf(**config))
-		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutype_labels)		
-		result = gfEvaluatorObj.evaluate_gf(parameter_dict, theta)
-		assert np.all(result>=0)
+		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutype_labels, exclude=[(2,3),])		
+		result = gfEvaluatorObj._subs_params(parameter_dict, epsilon)
+		assert isinstance(result,sage.symbolic.expression.Expression)
+
+	def test_IM_to_DIV(self, get_gf):
+		gf, mutype_labels, max_k = get_gf 
+		coalescence_rates = (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2'))
+		coal_rates_values = {c:sage.all.Rational(v) for c,v in zip(coalescence_rates, (1,1,1))}
+		parameter_dict = {
+			sage.all.var('M'):sage.all.Rational(0),
+			sage.all.var('T'):sage.all.Rational(1)
+			}
+		parameter_dict = {**parameter_dict, **coal_rates_values}
+		theta = sage.all.Rational(1)
+		epsilon = sage.all.Rational(0.00001)
+		gfEvaluatorObj = tg.gfEvaluator(gf, max_k, mutype_labels, exclude=[(2,3),])		
+		result = gfEvaluatorObj._subs_params(parameter_dict, epsilon)
+		assert isinstance(result,sage.symbolic.expression.Expression)
 
 @pytest.mark.topology
 class Test_divide_into_equivalence_classes:
