@@ -37,8 +37,10 @@ class gfEvaluator:
 		self.max_k = max_k
 		self.ordered_mutype_list = [sage.all.SR.var(mutype) for mutype in mutypes]
 		if restrict_to!=None:
+			self.restricted = True
 			all_mutation_configurations = mutations.add_marginals_restrict_to(restrict_to, max_k)
 		else:
+			self.restricted = False
 			all_mutation_configurations = mutations.return_mutype_configs(max_k)
 		if exclude!=None:
 			all_mutation_configurations = [m for m in all_mutation_configurations if all(not(all(m[idx]>0 for idx in e)) for e in exclude)]
@@ -47,17 +49,25 @@ class gfEvaluator:
 		root = tuple(0 for _ in max_k)
 		self.mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)
 		self.precision = precision
-		
-	def evaluate_gf(self, parameter_dict, theta, epsilon=0.0001):
-		rate_dict = {branchtype:theta for branchtype in self.ordered_mutype_list}
+
+	def _subs_params(self, parameter_dict, epsilon):
 		try:
 			gf = sum(self.gf).subs(parameter_dict)
 		except ValueError as e:
 			if 'division by zero' in str(e):
-				epsilon = sage.all.Rational(epsilon)
 				M = sage.all.SR.var('M')
-				parameter_dict[M] += parameter_dict[M]*epsilon
-				gf = sum(self.gf).subs(parameter_dict)
+				if parameter_dict[M]==0:
+					gf = sum(self.gf).subs(M=0)
+					gf = gf.subs(parameter_dict)
+				else:
+					epsilon = sage.all.Rational(epsilon)
+					parameter_dict[M] += parameter_dict[M]*epsilon
+					gf = sum(self.gf).subs(parameter_dict)
+		return gf
+		
+	def evaluate_gf(self, parameter_dict, theta, epsilon=0.0001):
+		rate_dict = {branchtype:theta for branchtype in self.ordered_mutype_list}
+		gf = self._subs_params(parameter_dict, epsilon)
 		ETPs = mutations.make_result_dict_from_mutype_tree_stack(
 			gf, 
 			self.mutype_tree, 
@@ -75,8 +85,10 @@ class gfEvaluator:
 		if not np.all(ETPs>0):
 			ETPs[ETPs<0] = 0
 		ETPs = ETPs.astype(np.float64)
-		try:
-			assert np.isclose(np.sum(ETPs), 1.0, rtol=1e-4)
-		except AssertionError:
-			sys.exit(f"[-] sum(ETPs): {np.sum(ETPs)} != 1 (rel_tol=1e-4)")
+		
+		if not self.restricted: #sum to 1 test only works if all ETPs have been calculated
+			try:
+				assert np.isclose(np.sum(ETPs), 1.0, rtol=1e-4)
+			except AssertionError:
+				sys.exit(f"[-] sum(ETPs): {np.sum(ETPs)} != 1 (rel_tol=1e-4)")
 		return ETPs
