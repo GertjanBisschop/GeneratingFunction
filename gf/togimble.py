@@ -1,5 +1,6 @@
 import numpy as np
 import sage.all
+import sys
 
 from . import gf as gflib
 from . import mutations
@@ -63,6 +64,8 @@ class gfEvaluator:
 					epsilon = sage.all.Rational(epsilon)
 					parameter_dict[M] += parameter_dict[M]*epsilon
 					gf = sum(self.gf).subs(parameter_dict)
+			else:
+				sys.exit(f'uncaught Value Error: {e}')
 		return gf
 		
 	def evaluate_gf(self, parameter_dict, theta, epsilon=0.0001):
