@@ -36,6 +36,7 @@ class gfEvaluator:
 	def __init__(self, gf, max_k, mutypes, precision=165, exclude=None, restrict_to=None):
 		self.gf = gf
 		self.max_k = max_k
+		#self.ETPs_shape = tuple(k+2 for k in max_k)
 		self.ordered_mutype_list = [sage.all.SR.var(mutype) for mutype in mutypes]
 		if restrict_to!=None:
 			self.restricted = True
@@ -74,11 +75,13 @@ class gfEvaluator:
 		ETPs = mutations.make_result_dict_from_mutype_tree_stack(
 			gf, 
 			self.mutype_tree, 
-			theta, rate_dict, 
+			theta, 
+			rate_dict, 
 			self.ordered_mutype_list, 
 			self.max_k,
 			self.precision
 			)
+		#ETPs = mutations.dict_to_array(ETPs, self.ETPs_shape, dtype=np.float64)
 		ETPs = mutations.dict_to_array(ETPs, (4,4,4,4), dtype=np.float64)
 		try:
 			assert np.all(np.logical_and(ETPs>=0, ETPs<=1))

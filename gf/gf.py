@@ -96,6 +96,14 @@ def sort_mutation_types(branchtypes):
 def inverse_laplace(equation, dummy_variable):
 	return (sage.all.inverse_laplace(subequation / dummy_variable, dummy_variable, sage.all.SR.var('T', domain='real'), algorithm='giac') for subequation in equation)
 
+def return_inverse_laplace(equation, dummy_variable):
+    return sage.all.inverse_laplace(
+        equation / dummy_variable, 
+        dummy_variable,
+        sage.all.SR.var('T', domain='real'), 
+        algorithm='giac'
+        )
+
 def split_gf(gf, chunksize):
 	#splitting gf generator using chunksize
 	i = iter(gf)
@@ -111,6 +119,10 @@ def split_gf_iterable(gf, chunksize):
 	while piece:
 		yield piece
 		piece = list(itertools.islice(i, chunksize))
+
+#representing samples
+def sample_to_str(sample_list):
+	return '/'.join('_'.join(lineage for lineage in pop) for pop in sample_list)
 
 class GFObject:
 	def __init__(self, sample_list, coalescence_rates, branchtype_dict, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
@@ -208,8 +220,6 @@ class GFObject:
 			outcomes = self.rates_and_events(state_list)
 			total_rate = sum([rate for rate, state in outcomes])
 			dummy_sum = sum(self.branchtype_dict[b] for b in current_branches)    
-			#for rate, new_state_list in outcomes:
-			#	yield (gf_old*rate*1/(total_rate + dummy_sum), new_state_list)
 			return [(gf_old*rate*1/(total_rate + dummy_sum), new_state_list) for rate, new_state_list in outcomes]
 		
 	def make_gf(self):
