@@ -96,6 +96,14 @@ def sort_mutation_types(branchtypes):
 def inverse_laplace(equation, dummy_variable):
 	return (sage.all.inverse_laplace(subequation / dummy_variable, dummy_variable, sage.all.SR.var('T', domain='real'), algorithm='giac') for subequation in equation)
 
+def return_inverse_laplace(equation, dummy_variable):
+    return sage.all.inverse_laplace(
+        equation / dummy_variable, 
+        dummy_variable,
+        sage.all.SR.var('T', domain='real'), 
+        algorithm='giac'
+        )
+
 def split_gf(gf, chunksize):
 	#splitting gf generator using chunksize
 	i = iter(gf)
