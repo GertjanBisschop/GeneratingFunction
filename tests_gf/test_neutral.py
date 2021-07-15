@@ -148,25 +148,25 @@ class Test_gf_simple:
 		sample_list = [('a', 'b')]
 		branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='label')
 		theta = 0.5 #this is actually theta/2
+		ordered_mutype_list = gflib.sort_mutation_types(branchtype_dict)
+		rate_dict = {branchtype:theta for branchtype in ordered_mutype_list}
 		coalescence_rates = (1,)
 		gfobj = gflib.GFObject(
 			sample_list, 
 			coalescence_rates, 
 			branchtype_dict
 			)
-		gf=gfobj.make_gf()
-		ordered_mutype_list = gflib.sort_mutation_types(branchtype_dict)
-		max_k=(2,2)
+		gf=sum(gfobj.make_gf())
+		max_k=np.array([2,2])
 		all_mutation_configurations = list(mutations.return_mutype_configs(max_k))
 		root = tuple(0 for _ in max_k)
 		mutype_tree = mutations.make_mutype_tree(all_mutation_configurations, root, max_k)
-		symbolic_prob_array =  mutations.make_prob_array(gf, mutype_tree, ordered_mutype_list, max_k, theta, dummy_variable=None, chunksize=100, num_processes=1, adjust_marginals=False)
-		result = mutations.evaluate_ar(symbolic_prob_array, {})
+		result = mutations.make_result_dict_from_mutype_tree_alt(gf, mutype_tree, theta, rate_dict, ordered_mutype_list, max_k)
+		result = result.astype(np.float64)
 		check = np.array([[0.5, 0.125,0.03125,0.66666667],
  				[0.125, 0.0625, 0.0234375, 0.22222222],
  				[0.03125, 0.0234375, 0.01171875, 0.07407407],
  				[0.66666667, 0.22222222, 0.07407407, 1]])
-		#mutations.adjust_marginals_array(result, len(ordered_mutype_list))
 		assert np.allclose(result, check)
 		
 	def test_probK(self):
@@ -176,6 +176,7 @@ class Test_gf_simple:
 		partials = ordered_mutype_list[:]
 		marginals = {}
 		ratedict = {mutype:theta for mutype in ordered_mutype_list}
+		mucounts = np.array([1,1])
 		mucount_total = 2
 		mucount_fact_prod = 1 
 		probk = mutations.simple_probK(gf, theta, partials, marginals, ratedict, mucount_total, mucount_fact_prod)
