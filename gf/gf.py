@@ -104,22 +104,6 @@ def return_inverse_laplace(equation, dummy_variable):
         algorithm='giac'
         )
 
-def split_gf(gf, chunksize):
-	#splitting gf generator using chunksize
-	i = iter(gf)
-	piece = sum(itertools.islice(i, chunksize))
-	while piece:
-		yield piece
-		piece = sum(itertools.islice(i, chunksize))
-
-def split_gf_iterable(gf, chunksize):
-	#splitting gf generator using chunksize
-	i = iter(gf)
-	piece = list(itertools.islice(i, chunksize))
-	while piece:
-		yield piece
-		piece = list(itertools.islice(i, chunksize))
-
 #representing samples
 def sample_to_str(sample_list):
 	return '/'.join('_'.join(lineage for lineage in pop) for pop in sample_list)
@@ -261,3 +245,21 @@ class GFObject:
 			else:
 				for new_step in self.gf_single_step_graph(tracking_list, state_list):
 					stack.append(new_step)
+
+################################## old functions #################################
+
+def split_gf(gf, chunksize):
+	#splitting gf generator using chunksize
+	i = iter(gf)
+	piece = sum(itertools.islice(i, chunksize))
+	while piece:
+		yield piece
+		piece = sum(itertools.islice(i, chunksize))
+
+def split_gf_iterable(gf, chunksize):
+	#splitting gf generator using chunksize
+	i = iter(gf)
+	piece = list(itertools.islice(i, chunksize))
+	while piece:
+		yield piece
+		piece = list(itertools.islice(i, chunksize))
