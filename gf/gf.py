@@ -97,12 +97,15 @@ def inverse_laplace(equation, dummy_variable):
 	return (sage.all.inverse_laplace(subequation / dummy_variable, dummy_variable, sage.all.SR.var('T', domain='real'), algorithm='giac') for subequation in equation)
 
 def return_inverse_laplace(equation, dummy_variable):
-    return sage.all.inverse_laplace(
-        equation / dummy_variable, 
-        dummy_variable,
-        sage.all.SR.var('T', domain='real'), 
-        algorithm='giac'
-        )
+    if dummy_variable!=None:
+    	return sage.all.inverse_laplace(
+    	    equation / dummy_variable, 
+    	    dummy_variable,
+    	    sage.all.SR.var('T', domain='real'), 
+    	    algorithm='giac'
+    	    )
+    else:
+    	return equation
 
 #representing samples
 def sample_to_str(sample_list):
@@ -139,7 +142,6 @@ class GFObject:
 				modified_state_list = list(state_list)
 				modified_state_list[idx] = coal_event
 				result.append((count*rate, tuple(modified_state_list)))
-				#yield((count, tuple(modified_state_list)))
 		return result
 
 	def migration_events(self, state_list):

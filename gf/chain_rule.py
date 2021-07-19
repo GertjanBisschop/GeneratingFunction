@@ -40,7 +40,7 @@ class GFObjectChainRule(gflib.GFObject):
 						equation_dict[(parent_node, child_node)] = eq_idx
 						stack.append((path, new_state_list))
 						
-		return (paths, eq_list)
+		return (paths, np.array(eq_list))
 	
 	def gf_single_step(self, state_list):
 			current_branches = list(gflib.flatten(state_list))
@@ -72,7 +72,7 @@ def gf_from_paths(paths, eq_list, default=None):
 
 def split_paths(paths, eq_list, dummy_var):
 	if dummy_var==None:
-		return (paths, [])
+		return (paths, [[] for _ in range(len(paths))])
 	to_invert = []
 	constant = []
 	for path in paths:
@@ -132,8 +132,12 @@ def invert_eq(to_invert_paths, eq_list, dummy_var, num_constant_eq=0, expand_inv
 		expand_inverted_paths = [inverted_paths[i] for i in inverse_idxs]
 		return (all_inverted, expand_inverted_paths)	
 	else:
-		inverted_paths = inverse_idxs + num_constant_eq
-		expand_inverted_paths = np.reshape(inverted_paths, (-1,1))
+		if inverted[0]==1:
+			expand_inverted_paths = [[i+num_constant_eq-1,] if i!=0 else [] for i in inverse_idxs]
+			return (inverted[1:], expand_inverted_paths)
+		else:
+			inverted_paths = inverse_idxs + num_constant_eq
+			expand_inverted_paths = np.reshape(inverted_paths, (-1,1))
 		return (inverted, expand_inverted_paths)
 
 def expand_paths_associatively(constant, to_expand):

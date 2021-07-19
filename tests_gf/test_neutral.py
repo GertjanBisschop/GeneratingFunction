@@ -23,7 +23,7 @@ all_configs = {
 					'reference_pop': 'A_B'
 					},
 		"sim_configs": [{'Ne_A': 1.3e6 , 'Ne_B': 6e5, 'Ne_A_B': 1.5e6, 'T': 1e7, 'me_A_B':7e-7, 'recombination':0}],
-		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'migration_rate':sage.all.var('M'), 'migration_direction':[(1,2)], 'exodus_rate':sage.all.var('E'), 'exodus_direction':[(1,2,0)], 'ancestral_pop': 0}
+		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'migration_rate':sage.all.SR.var('M'), 'migration_direction':[(1,2)], 'exodus_rate':sage.all.var('E'), 'exodus_direction':[(1,2,0)], 'ancestral_pop': 0}
 		},
 	'DIV' : {
 		"global_info" : {
@@ -36,7 +36,7 @@ all_configs = {
 					'reference_pop': 'A_B'
 					},
 		"sim_configs": [{'Ne_A': 1.3e6 , 'Ne_B': 6e5, 'Ne_A_B': 1.5e6, 'T': 1e7, 'recombination':0}],
-		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'exodus_rate':sage.all.var('E'), 'exodus_direction':[(1,2,0)], 'ancestral_pop': 0}
+		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'exodus_rate':sage.all.SR.var('E'), 'exodus_direction':[(1,2,0)], 'ancestral_pop': 0}
 		},
 	'MIG_BA' : {
 		"global_info" : {
@@ -49,7 +49,7 @@ all_configs = {
 					'reference_pop': 'A'
 					},
 		"sim_configs": [{'Ne_A': 1.3e6 , 'Ne_B': 6e5, 'me_B_A':7e-7, 'recombination':0}],
-		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'migration_rate':sage.all.var('M'), 'migration_direction':[(2,1)], 'ancestral_pop': 1}
+		"gf_vars": {'sample_list' :[(),('a','a'),('b','b')], 'migration_rate':sage.all.SR.var('M'), 'migration_direction':[(2,1)], 'ancestral_pop': 1}
 		}
 	}
 
@@ -76,10 +76,10 @@ class Test_aux:
 			assert all(test[i]==truth[i] for i in range(len(test)))
 
 	@pytest.mark.parametrize("sample_list, check",
-	[(([(), ('a','b'),('c','d')]),([(sage.all.var('c1'), ((), ('ab',), ('c', 'd'))), (sage.all.var('c2'), ((), ('a', 'b'), ('cd',)))])),
-	(([('a', 'b', 'b'),(), ('a',)]),([(2*sage.all.var('c0'), (('ab', 'b'), (), ('a',))), (1*sage.all.var('c0'), (('a', 'bb'), (), ('a',)))]))])
+	[(([(), ('a','b'),('c','d')]),([(sage.all.var('c1'), ((), ('ab',), ('c', 'd'))), (sage.all.SR.var('c2'), ((), ('a', 'b'), ('cd',)))])),
+	(([('a', 'b', 'b'),(), ('a',)]),([(2*sage.all.var('c0'), (('ab', 'b'), (), ('a',))), (1*sage.all.SR.var('c0'), (('a', 'bb'), (), ('a',)))]))])
 	def test_coalescence_rates(self, sample_list, check):
-		coalescence_rates = (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2'))
+		coalescence_rates = (sage.all.SR.var('c0'), sage.all.SR.var('c1'), sage.all.SR.var('c2'))
 		branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='label')
 		gfobj = gflib.GFObject(sample_list, coalescence_rates, branchtype_dict, exodus_rate=1, exodus_direction=[(1,2,0)])
 		result = list(gfobj.coalescence_events(gfobj.sample_list))
@@ -123,7 +123,7 @@ class Test_aux:
 	def test_exodus(self):
 		sample_list = [(), ('a','a'),('c','d')]
 		branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='label')
-		exodus_rate = sage.all.var('E')
+		exodus_rate = sage.all.SR.var('E')
 		gfobj = gflib.GFObject(sample_list, (1,1,1), branchtype_dict, exodus_rate=exodus_rate, exodus_direction=[(1,2,0)])
 		result = list(gfobj.exodus_events(gfobj.sample_list))
 		check = [(exodus_rate, (('a', 'a', 'c', 'd'), (), ()))]
@@ -170,8 +170,8 @@ class Test_gf_simple:
 		assert np.allclose(result, check)
 		
 	def test_probK(self):
-		ordered_mutype_list = [sage.all.var('z_a'), sage.all.var('z_b')]
-		theta = sage.all.var('theta')/2
+		ordered_mutype_list = [sage.all.SR.var('z_a'), sage.all.SR.var('z_b')]
+		theta = sage.all.SR.var('theta')/2
 		gf = 1/(sum(ordered_mutype_list)+1)
 		partials = ordered_mutype_list[:]
 		marginals = {}
@@ -189,11 +189,11 @@ class Test_zero_division:
 	def get_gf(self):
 		config = {
 			'sample_list' :[(),('a','a'),('b','b')], 
-			'coalescence_rates': (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2')),
+			'coalescence_rates': (sage.all.SR.var('c0'), sage.all.SR.var('c1'), sage.all.SR.var('c2')),
 			'k_max': {'m_1':2, 'm_2':2, 'm_3':2, 'm_4':2},
-			'migration_rate':sage.all.var('M'), 
+			'migration_rate':sage.all.SR.var('M'), 
 			'migration_direction':[(1,2)], 
-			'exodus_rate':sage.all.var('E'),
+			'exodus_rate':sage.all.SR.var('E'),
 			'exodus_direction':[(1,2,0)]
 			}
 		mutype_labels, max_k = zip(*sorted(config['k_max'].items()))
@@ -204,11 +204,11 @@ class Test_zero_division:
 
 	def test_zero_div(self, get_gf):
 		gf, mutype_labels, max_k = get_gf 
-		coalescence_rates = (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2'))
+		coalescence_rates = (sage.all.SR.var('c0'), sage.all.SR.var('c1'), sage.all.SR.var('c2'))
 		coal_rates_values = {c:sage.all.Rational(v) for c,v in zip(coalescence_rates, (3,1,3))}
 		parameter_dict = {
-			sage.all.var('M'):sage.all.Rational(2),
-			sage.all.var('T'):sage.all.Rational(1)
+			sage.all.SR.var('M'):sage.all.Rational(2),
+			sage.all.SR.var('T'):sage.all.Rational(1)
 			}
 		parameter_dict = {**parameter_dict, **coal_rates_values}
 		theta = sage.all.Rational(1)
@@ -219,11 +219,11 @@ class Test_zero_division:
 
 	def test_IM_to_DIV(self, get_gf):
 		gf, mutype_labels, max_k = get_gf 
-		coalescence_rates = (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2'))
+		coalescence_rates = (sage.all.SR.var('c0'), sage.all.SR.var('c1'), sage.all.SR.var('c2'))
 		coal_rates_values = {c:sage.all.Rational(v) for c,v in zip(coalescence_rates, (1,1,1))}
 		parameter_dict = {
-			sage.all.var('M'):sage.all.Rational(0),
-			sage.all.var('T'):sage.all.Rational(1)
+			sage.all.SR.var('M'):sage.all.Rational(0),
+			sage.all.SR.var('T'):sage.all.Rational(1)
 			}
 		parameter_dict = {**parameter_dict, **coal_rates_values}
 		theta = sage.all.Rational(1)
@@ -248,7 +248,7 @@ class Test_to_gimble:
 		config = all_configs[model]
 		config['sim_config'] = config['sim_configs'][0]
 		del config['sim_configs']
-		coalescence_rates = tuple(sage.all.var(c) for c in ['c0', 'c1', 'c2'])
+		coalescence_rates = tuple(sage.all.SR.var(c) for c in ['c0', 'c1', 'c2'])
 		migration_rate = config['gf_vars'].get('migration_rate')
 		migration_direction = config['gf_vars'].get('migration_direction')
 		exodus_rate = config['gf_vars'].get('exodus_rate')
