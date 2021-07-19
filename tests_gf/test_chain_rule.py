@@ -87,7 +87,7 @@ class Test_Paths:
 	def return_gf(self, request):
 		sample_list = [(),('a','a'),('b','b')]
 		ancestral_pop = 0
-		coalescence_rates = (sage.all.var('c0'), sage.all.var('c1'), sage.all.var('c2'))
+		coalescence_rates = (sage.all.SR.var('c0'), sage.all.SR.var('c1'), sage.all.SR.var('c2'))
 		k_max = {'m_1':2, 'm_2':2, 'm_3':2, 'm_4':2}
 		mutype_labels, max_k = zip(*sorted(k_max.items()))
 		branchtype_dict = gflib.make_branchtype_dict(sample_list, mapping='unrooted', labels=mutype_labels)
@@ -132,7 +132,7 @@ class TestExpand:
     		2*c0/(3*c0 + m_1 + m_2),
     		1/2*c0/(3*c0 + m_1 + m_2),
     		])
-		inverted, expand_inverted_paths = cr.invert_eq(to_invert, equations, E, 3)
+		inverted, expand_inverted_paths = cr.invert_eq(to_invert, equations, E, 3, expand_inverted_eq=True)
 		print('inv:', inverted)
 		print('expand_inverted_paths:', expand_inverted_paths)
 		assert expand_inverted_paths == [[], [3, 4, 5, 6, 7, 8], [9], [9], []]
@@ -155,7 +155,54 @@ class TestExpand:
     		2*c0/(3*c0 + m_1 + m_2),
     		1/2*c0/(3*c0 + m_1 + m_2),
     		])
-		inverted, expand_inverted_paths = cr.invert_eq(to_invert, equations, E, 3)
+		inverted, expand_inverted_paths = cr.invert_eq(to_invert, equations, E, 3, expand_inverted_eq=True)
+		print('inv:', inverted)
+		print('expand_inverted_paths:', expand_inverted_paths)
+		constant_unique, constant_paths_remapped = cr.remap_paths_unique(c_p)
+		new_paths = list(cr.expand_paths_associatively(constant_paths_remapped, expand_inverted_paths))
+		print('new_paths:', new_paths)
+		expected = [np.array([0, 1, 2]), np.array([0]), np.array([1]), np.array([0, 2]), np.array([1, 2])]
+		assert len(new_paths) == len(c_p)
+		assert np.all(np.array_equal(a1,a2) for a1, a2 in zip(new_paths, expected))
+
+	def test_invert_eq_simple(self):
+		c_p = [np.array([3, 4, 5]), np.array([3]), np.array([]), np.array([3,5]), np.array([4,5])]
+		to_invert = [[], [0, 1], [0, 1, 2], [0,1, 2], []]
+		sage.all.var(['E', 'c0', 'c1', 'c2', 'm_1', 'm_2', 'm_3', 'm_4', 'M'])
+		equations = np.array([
+			c1/(E + c1 + c2 + 2*m_1 + 2*m_2), 
+    		c2/(E + c1 + c2 + 2*m_1 + 2*m_2),
+    		E/(E + c1 + c2 + 2*m_1 + 2*m_2),
+    		1/2*c0/(3*c0 + m_1 + m_2),
+    		2*c0/(3*c0 + m_1 + m_2),
+    		1/2*c0/(3*c0 + m_1 + m_2),
+    		])
+		inverted, expand_inverted_paths = cr.invert_eq(to_invert, equations, E, 3, expand_inverted_eq=False)
+		print('inv:')
+		for e in inverted:
+			print(e)
+		print('expand_inverted_paths:', expand_inverted_paths)
+		assert expand_inverted_paths == [[], [3], [4], [4], []]
+		assert len(expand_inverted_paths) == len(c_p)
+		constant_unique, constant_paths_remapped = cr.remap_paths_unique(c_p)
+		new_paths = list(cr.expand_paths_associatively(constant_paths_remapped, expand_inverted_paths))
+		print('new_paths:', new_paths)
+		expected = [np.array([0, 1, 2]), np.array([0, 3]), np.array([4]), np.array([0, 2, 4]), np.array([1, 2])]
+		assert np.all(np.array_equal(a1,a2) for a1, a2 in zip(new_paths, expected))
+
+	def test_invert_constant_simple(self):
+		c_p = [np.array([3, 4, 5]), np.array([3]), np.array([4]), np.array([3,5]), np.array([4,5])]
+		to_invert = [[], [], [], [], []]
+		sage.all.var(['E', 'c0', 'c1', 'c2', 'm_1', 'm_2', 'm_3', 'm_4', 'M'])
+		equations = np.array([
+			c1/(E + c1 + c2 + 2*m_1 + 2*m_2), 
+    		c2/(E + c1 + c2 + 2*m_1 + 2*m_2),
+    		E/(E + c1 + c2 + 2*m_1 + 2*m_2),
+    		1/2*c0/(3*c0 + m_1 + m_2),
+    		2*c0/(3*c0 + m_1 + m_2),
+    		1/2*c0/(3*c0 + m_1 + m_2),
+    		])
+		inverted, expand_inverted_paths = cr.invert_eq(to_invert, equations, E, 3, expand_inverted_eq=False)
 		print('inv:', inverted)
 		print('expand_inverted_paths:', expand_inverted_paths)
 		constant_unique, constant_paths_remapped = cr.remap_paths_unique(c_p)
