@@ -131,7 +131,7 @@ class GFObject:
 			self.exodus_rate = exodus_rate
 
 	def coalescence_events(self, state_list):
-		"""Generator returning all possible new population configurations due to coalescence,
+		"""Returning all possible new population configurations due to coalescence,
 		and their respective rates
 		Arguments:
 			state_list {[list]} -- [list of population tuples containing lineages (str)]
