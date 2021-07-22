@@ -16,7 +16,7 @@ class Test_aux:
 	def test_coalescence(self, sample_list, check):
 		#rate_array: [c0,c1,c2,M,E,m_1,m_2,m_3,m_4]
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='label', starting_index=5)
-		gfobj = gfmat.GFObject(sample_list, (0,1,2), branchtype_dict, exodus_rate=4, exodus_direction=[(1,2,0)])
+		gfobj = gflib.GFMatrixObject(sample_list, (0,1,2), branchtype_dict, exodus_rate=4, exodus_direction=[(1,2,0)])
 		result = list(gfobj.coalescence_events(gfobj.sample_list))
 		print('result:', result)
 		print('check:', check)
@@ -29,7 +29,7 @@ class Test_aux:
 	def test_coalescence_same_rates(self, sample_list, check):
 		coalescence_rates = (0, 0, 1)
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='label', starting_index=5)
-		gfobj = gfmat.GFObject(sample_list, coalescence_rates, branchtype_dict, exodus_rate=4, exodus_direction=[(1,2,0)])
+		gfobj = gflib.GFMatrixObject(sample_list, coalescence_rates, branchtype_dict, exodus_rate=4, exodus_direction=[(1,2,0)])
 		result = list(gfobj.coalescence_events(gfobj.sample_list))
 		print('result:', result)
 		print('check:', check)
@@ -43,7 +43,7 @@ class Test_aux:
 		)
 	def test_migration(self, sample_list, check):
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='label')
-		gfobj = gfmat.GFObject(sample_list, (0,1,2), branchtype_dict, migration_rate=3, migration_direction=[(1,2)])
+		gfobj = gflib.GFMatrixObject(sample_list, (0,1,2), branchtype_dict, migration_rate=3, migration_direction=[(1,2)])
 		result = list(gfobj.migration_events(gfobj.sample_list))
 		print('result:', result)
 		print('check:', check)
@@ -53,7 +53,7 @@ class Test_aux:
 	def test_migration_empty(self):
 		sample_list = [(), (),('c','d')]
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='label')
-		gfobj = gfmat.GFObject(sample_list, (0,1,2), branchtype_dict, migration_rate=3, migration_direction=[(1,2)])
+		gfobj = gflib.GFMatrixObject(sample_list, (0,1,2), branchtype_dict, migration_rate=3, migration_direction=[(1,2)])
 		result = list(gfobj.migration_events(gfobj.sample_list))
 		print('result:', result)
 		assert isinstance(result, list)
@@ -62,7 +62,7 @@ class Test_aux:
 	def test_exodus_empty(self):
 		sample_list = [(), (),('c','d')]
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='label')
-		gfobj = gfmat.GFObject(sample_list, (0,1,2), branchtype_dict, exodus_rate=4, exodus_direction=[(0,1)])
+		gfobj = gflib.GFMatrixObject(sample_list, (0,1,2), branchtype_dict, exodus_rate=4, exodus_direction=[(0,1)])
 		result = list(gfobj.exodus_events(gfobj.sample_list))
 		print('result:', result)
 		assert isinstance(result, list)
@@ -71,7 +71,7 @@ class Test_aux:
 	def test_exodus(self):
 		sample_list = [(), ('a','a'),('c','d')]
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='label')
-		gfobj = gfmat.GFObject(sample_list, (0,1,2), branchtype_dict, exodus_rate=4, exodus_direction=[(1,2,0)])
+		gfobj = gflib.GFMatrixObject(sample_list, (0,1,2), branchtype_dict, exodus_rate=4, exodus_direction=[(1,2,0)])
 		result = list(gfobj.exodus_events(gfobj.sample_list))
 		check = [(4, 1, (('a', 'a', 'c', 'd'), (), ()))]
 		print('result:', result)
@@ -84,7 +84,7 @@ class Test_Simple_Models:
 	def test_single_step(self):
 		sample_list = [('a','a', 'b', 'b')]
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='unrooted')
-		gfobj = gfmat.GFObject(sample_list, (0,), branchtype_dict)
+		gfobj = gflib.GFMatrixObject(sample_list, (0,), branchtype_dict)
 		multiplier_array, new_state_list = gfobj.gf_single_step(sample_list)
 		print('new_state_list:', new_state_list)
 		print('multiplier_array:')
@@ -101,7 +101,7 @@ class Test_Simple_Models:
 		sample_list = [('a','a', 'b', 'b'),()]
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='unrooted')
 		#rate_array = [c0, c1, E, m_1, m_2, m_3, m_4]
-		gfobj = gfmat.GFObject(sample_list, (0, 1), branchtype_dict, exodus_rate=2, exodus_direction=[(0,1),])
+		gfobj = gflib.GFMatrixObject(sample_list, (0, 1), branchtype_dict, exodus_rate=2, exodus_direction=[(0,1),])
 		multiplier_array, new_state_list = gfobj.gf_single_step(sample_list)
 		print('new_state_list:', new_state_list)
 		print('multiplier_array:')
@@ -119,7 +119,7 @@ class Test_Simple_Models:
 		sample_list = [('a','a'),('b', 'b')]
 		branchtype_dict = gfmat.make_branchtype_dict_idxs(sample_list, mapping='unrooted')
 		#rate_array = [c0, c1, E, m_1, m_2, m_3, m_4]
-		gfobj = gfmat.GFObject(sample_list, (0, 1), branchtype_dict, exodus_rate=2, exodus_direction=[(0,1),])
+		gfobj = gflib.GFMatrixObject(sample_list, (0, 1), branchtype_dict, exodus_rate=2, exodus_direction=[(0,1),])
 		multiplier_array, new_state_list = gfobj.gf_single_step(sample_list)
 		print('new_state_list:', new_state_list)
 		print('multiplier_array:')
@@ -178,7 +178,7 @@ class Test_Paths:
 		variables_array += [sage.all.SR.var(m) for m in mutype_labels]
 		variables_array = np.array(variables_array, dtype=object)
 
-		gfobj = gfmat.GFObject(
+		gfobj = gflib.GFMatrixObject(
 			sample_list, 
 			coalescence_rate_idxs, 
 			branchtype_dict_mat,
@@ -189,7 +189,7 @@ class Test_Paths:
 			)
 		gf_mat = list(gfobj.make_gf())
 		
-		gfobj2 = cr.GFObjectChainRule(
+		gfobj2 = gflib.GFObjectChainRule(
 			sample_list, 
 			coalescence_rates, 
 			branchtype_dict_chain,

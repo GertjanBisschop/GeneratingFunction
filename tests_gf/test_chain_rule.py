@@ -104,7 +104,7 @@ class Test_Paths:
 			)
 		gf_simple = list(gfobj.make_gf())
 		
-		gfobj2 = cr.GFObjectChainRule(
+		gfobj2 = gflib.GFObjectChainRule(
 			sample_list, 
 			coalescence_rates, 
 			branchtype_dict,
