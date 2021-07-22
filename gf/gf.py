@@ -1,14 +1,8 @@
 import collections
-import copy
-import functools
 import itertools
 import numpy as np
-import operator
 import sage.all
-import string
 import sys
-
-from timeit import default_timer as timer
 
 #auxilliary functions
 def powerset(iterable):
@@ -111,22 +105,34 @@ def return_inverse_laplace(equation, dummy_variable):
 def sample_to_str(sample_list):
 	return '/'.join('_'.join(lineage for lineage in pop) for pop in sample_list)
 
+def paths_from_visited_node(graph, node, equation_dict, path):
+	stack = [(path, node),]
+	while stack:
+		path, parent = stack.pop()
+		children = graph.get(parent, None)
+		if children!=None:
+			for child in children:
+				stack.append((path[:] + [equation_dict[(parent, child)],], child)) 
+		else:
+			yield path
+
 class GFObject:
 	def __init__(self, sample_list, coalescence_rates, branchtype_dict, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
 		assert len(sample_list) == len(coalescence_rates)
 		if sum(1 for pop in sample_list if len(pop)>0)>1:
 			assert migration_direction or exodus_direction, 'lineages from different populations cannot coalesce without migration or exodus event.'
 		self.sample_list = tuple(tuple(sorted(pop)) for pop in sample_list)
-		self.coalescence_rates = coalescence_rates
 		self.branchtype_dict = branchtype_dict
+
+		self.coalescence_rates = coalescence_rates
 		self.migration_direction = migration_direction
 		if migration_direction and not migration_rate:
-			self.migration_rate = sage.all.SR.var('M') #set domain???
+			raise ValueError('Migration direction provided but no migration rate.')
 		else:
 			self.migration_rate = migration_rate
 		self.exodus_direction = exodus_direction
 		if exodus_direction and not exodus_rate:
-			self.exodus_rate = sage.all.SR.var('E') #set domain?
+			raise ValueError('Migration direction provided but no migration rate.')
 		else:
 			self.exodus_rate = exodus_rate
 
@@ -209,10 +215,7 @@ class GFObject:
 			return [(gf_old*rate*1/(total_rate + dummy_sum), new_state_list) for rate, new_state_list in outcomes]
 		
 	def make_gf(self):
-		"""[generator returning generating function]
-		Yields:
-			[type] -- []
-		"""
+		
 		stack = [(1, self.sample_list)]
 		result=[]
 		while stack:
@@ -223,30 +226,160 @@ class GFObject:
 				for gf_nplus1 in self.gf_single_step(gf_n, state_list):
 					stack.append(gf_nplus1)
 
-	def gf_single_step_graph(self, tracking_list, state_list):
+class GFObjectChainRule(GFObject):
+	
+	def make_gf(self):
+		stack = [(list(), self.sample_list),]
+		paths =  list()
+		eq_list = list()
+		
+		#keeping track of things
+		graph_dict = collections.defaultdict(list)
+		equation_dict = dict() #key=(parent, child), value=eq_idx
+		nodes_visited = list() #list of all nodes visisted
+	
+		while stack:
+			path_so_far, state_list = stack.pop()
+			parent_node = sample_to_str(state_list)
+			if sum(len(pop) for pop in state_list)==1:		
+				paths.append(path_so_far)
+			else:
+				if parent_node in nodes_visited:
+					#depth first search through graph
+					for add_on_path in paths_from_visited_node(graph_dict, parent_node, equation_dict, path_so_far):
+						paths.append(add_on_path)		
+				else:
+					nodes_visited.append(parent_node)
+					for eq, new_state_list in self.gf_single_step(state_list):
+						child_node = sample_to_str(new_state_list)
+						eq_idx = len(eq_list)
+						eq_list.append(eq)
+						path = path_so_far[:]
+						path.append(eq_idx)
+						graph_dict[parent_node].append(child_node)
+						equation_dict[(parent_node, child_node)] = eq_idx
+						stack.append((path, new_state_list))
+						
+		return (paths, np.array(eq_list))
+	
+	def gf_single_step(self, state_list):
 		current_branches = list(flatten(state_list))
 		numLineages = len(current_branches)
 		if numLineages == 1:
 			ValueError('gf_single_step fed with single lineage, should have been caught.')
 		else:
 			outcomes = self.rates_and_events(state_list)
-			for rate, new_state_list in outcomes:
-				yield (tracking_list[:]+[(rate, new_state_list),], new_state_list)
+			total_rate = sum([rate for rate, state in outcomes])
+			dummy_sum = sum(self.branchtype_dict[b] for b in current_branches)    
+			return [(rate*1/(total_rate + dummy_sum), new_state_list) for rate, new_state_list in outcomes]
 
-	def make_gf_graph(self):
-		"""[generator returning gf graph]
-		Yields:
-			[type] -- []
-		"""
-		stack = [([(1,tuple(self.sample_list))], self.sample_list)]
-		result=[]
+class GFMatrixObject(GFObject):
+	def __init__(self, sample_list, coalescence_rates, branchtype_dict, migration_direction=None, migration_rate=None, exodus_direction=None, exodus_rate=None):
+		super().__init__(sample_list, coalescence_rates, branchtype_dict, migration_direction, migration_rate, exodus_direction, exodus_rate)
+		assert all(isinstance(coal_rate, int) for coal_rate in self.coalescence_rates), "Coalescence rates should be indices."
+		self.num_branchtypes = len(set(self.branchtype_dict.values()))
+		num_events = 0
+		if self.migration_rate!=None:
+			assert isinstance(self.migration_rate, int), "Migration rate should be an integer index."
+			num_events+=1
+		if self.exodus_rate!=None:
+			num_events+=1
+			assert isinstance(self.exodus_rate, int), "Exodus rate should be an integer index."
+		self.num_variables = max(coalescence_rates) + 1 + num_events
+
+	def make_gf(self):
+		stack = [(list(), self.sample_list),]
+		paths =  list()
+		eq_list = list()
+		eq_idx = 0
+		#keeping track of things
+		graph_dict = collections.defaultdict(list)
+		equation_dict = dict() #key=(parent, child), value=eq_idx
+		nodes_visited = list() #list of all nodes visisted
+	
 		while stack:
-			tracking_list, state_list =stack.pop()
-			if sum(len(pop) for pop in state_list)==1:
-				yield tracking_list
+			path_so_far, state = stack.pop()
+			parent_node = sample_to_str(state)
+			if sum(len(pop) for pop in state)==1:		
+				paths.append(path_so_far)
 			else:
-				for new_step in self.gf_single_step_graph(tracking_list, state_list):
-					stack.append(new_step)
+				if parent_node in nodes_visited:
+					#depth first search through graph
+					for add_on_path in paths_from_visited_node(graph_dict, parent_node, equation_dict, path_so_far):
+						paths.append(add_on_path)		
+				else:
+					nodes_visited.append(parent_node)
+					multiplier_array, new_state_list = self.gf_single_step(state)
+					eq_list.append(multiplier_array)
+					for new_state in new_state_list:
+						child_node = sample_to_str(new_state)
+						path = path_so_far[:]
+						path.append(eq_idx)
+						graph_dict[parent_node].append(child_node)
+						equation_dict[(parent_node, child_node)] = eq_idx
+						stack.append((path, new_state))
+						eq_idx+=1
+		return (paths, np.concatenate(eq_list, axis=0))
+
+	def gf_single_step(self, state_list):
+		current_branches = list(flatten(state_list))
+		numLineages = len(current_branches)
+		if numLineages == 1:
+			ValueError('gf_single_step fed with single lineage, should have been caught.')
+	
+		# collecting the idxs of branches in state_list
+		dummy_sum = [self.branchtype_dict[b] for b in current_branches]
+		dummy_array = np.zeros((2, self.num_branchtypes), dtype=np.uint8) 
+		dummy_unique, dummy_counts = np.unique(dummy_sum, return_counts=True)
+		dummy_array[1, dummy_unique] = dummy_counts
+		
+		outcomes = self.rates_and_events(state_list)
+		multiplier_array = np.zeros((len(outcomes), 2, self.num_variables), dtype=np.uint8)
+		new_state_list = list()
+		
+		for event_idx, (rate_idx, count, new_state) in enumerate(outcomes):
+			multiplier_array[event_idx, 0, rate_idx] = count
+			new_state_list.append(new_state)
+		
+		multiplier_array[:, 1] = np.sum(multiplier_array[:,0], axis=0)
+		dummy_array = np.tile(dummy_array, (multiplier_array.shape[0],1,1))
+		multiplier_array = np.concatenate((multiplier_array, dummy_array), axis=2)
+		return (multiplier_array, new_state_list)
+
+	def coalescence_events(self, state_list):
+		result = []
+		for idx, (pop, rate_idx) in enumerate(zip(state_list, self.coalescence_rates)):
+			for count, coal_event in coalesce_single_pop(pop):
+				modified_state_list = list(state_list)
+				modified_state_list[idx] = coal_event
+				result.append((rate_idx, count, tuple(modified_state_list)))
+		return result
+
+	def migration_events(self, state_list):
+		result = []
+		if self.migration_direction:
+			for source, destination in self.migration_direction:
+				lineage_count = collections.Counter(state_list[source])
+				for lineage, count in lineage_count.items():
+					temp = list(state_list)
+					idx = temp[source].index(lineage)
+					temp[source] = tuple(temp[source][:idx] + temp[source][idx+1:])
+					temp[destination] = tuple(sorted(list(temp[destination]) + [lineage,])) 
+					result.append((self.migration_rate, count, tuple(temp)))
+		return result
+
+	def exodus_events(self, state_list):
+		result = []
+		if self.exodus_direction:
+			for *source, destination in self.exodus_direction:
+				temp = list(state_list)
+				sources_joined = tuple(itertools.chain.from_iterable([state_list[idx] for idx in source]))
+				if len(sources_joined)>0:
+					temp[destination] = tuple(sorted(state_list[destination] + sources_joined))
+					for idx in source:
+						temp[idx] = ()
+					result.append((self.exodus_rate, 1, tuple(temp)))
+		return result
 
 ################################## old functions #################################
 
