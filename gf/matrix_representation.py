@@ -35,3 +35,14 @@ def make_branchtype_dict_idxs(sample_list, mapping='unrooted', labels=None, star
 def equations_from_matrix(multiplier_array, variables_array):
 	temp = multiplier_array.dot(variables_array)
 	return temp[:,0]/temp[:,1]
+
+def split_paths_laplace(paths, multiplier_array, delta_idx):
+	filtered_paths = []
+	for path in paths:
+		condition = multiplier_array[path, 1, delta_idx]==1
+		filtered_paths.append(split(path, condition))
+	return filtered_paths
+
+def split(arr_in, condition):
+	arr = np.array(arr_in, dtype=int)
+	return [arr[~condition], arr[condition]] #return (constants, to_invert)

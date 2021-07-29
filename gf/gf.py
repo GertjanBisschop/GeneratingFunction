@@ -4,28 +4,26 @@ import numpy as np
 import sage.all
 import sys
 
+from . import matrix_representation as gfmat
+
 #auxilliary functions
 def powerset(iterable):
-	"""returns generator containing all possible subsets of iterable
-	Arguments:
-		iterable {[type]} -- [description]
+	""" 
+	returns generator containing all possible subsets of iterable
 	"""
 	s=list(iterable)
 	return (''.join(sorted(subelement)) for subelement in (itertools.chain.from_iterable(itertools.combinations(s, r) for r in range(len(s)+1))))
 
 def flatten(input_list):
-	"""Flattens iterable from depth n to depth n-1
-	Arguments:
-		input_list {[iterable]} -- [description]
+	"""
+	Flattens iterable from depth n to depth n-1
 	"""
 	return itertools.chain.from_iterable(input_list)
 
 def coalesce_lineages(input_tuple, to_join):
-	'''Joins lineages and returns resulting tuple of lineages for a single pop
-	Arguments:
-		input_tuple {[iterable]} -- [iterable containing lineages(str)]
-		to_join {[iterable]} -- [containing all lineages to be joined]
-	'''
+	"""
+	Joins lineages and returns resulting tuple of lineages for a single pop
+	"""
 	result=list(input_tuple)
 	for lineage in to_join:
 		result.remove(lineage)
@@ -34,10 +32,10 @@ def coalesce_lineages(input_tuple, to_join):
 	return tuple(result)
 
 def coalesce_single_pop(pop_state):
-	"""For single population generate all possible coalescence events
-	Arguments:
-		pop_state {[iterable]} -- [containing all lineages (str) present within pop]
-		coal_rate {[sage_var, float]} -- [rate at which coalescence happens in that pop]
+	"""
+	For single population generate all possible coalescence events
+	param: iterable pop_state: containing all lineages (str) present within pop
+	param: float, object coal_rate: rate at which coalescence happens in that pop
 	"""
 	coal_event_pairs = list(itertools.combinations(pop_state,2))
 	coal_counts = collections.Counter(coal_event_pairs)
@@ -47,9 +45,10 @@ def coalesce_single_pop(pop_state):
 
 #dealing with mutation/branchtypes
 def make_branchtype_dict(sample_list, mapping='unrooted', labels=None):
-	'''Maps lineages to their respective mutation type
-	Mappings: 'unrooted', 'label'
-	'''
+	"""
+	Maps lineages to their respective mutation type
+	Possible mappings: 'unrooted', 'label'
+	"""
 	all_branchtypes=list(flatten(sample_list))
 	branches = [branchtype for branchtype in powerset(all_branchtypes) if len(branchtype)>0 and len(branchtype)<len(all_branchtypes)]	
 	if mapping.startswith('label'):
@@ -101,6 +100,81 @@ def return_inverse_laplace(equation, dummy_variable):
     else:
     	return equation
 
+def inverse_laplace_single_event_all_temp(multiplier_array, var_array, time, delta_idx, paths):
+	#temp placeholder function
+	for eq in all_equations:
+		try:
+			inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom_list)
+		except ZeroDivisionError:
+			equation = gfmat.equations_from_matrix(multiplier_array, var_array)
+			return sage.all.inverse_laplace(
+				equation/var_array[delta_idx],
+				var_array[delta_idx], 
+				time, 
+				algorithm='giac'
+				)
+
+def inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom_list):
+	"""
+	Inverse laplace of (F/delta, delta, time)
+	potential issue 1: equality of two constants in the denominator:
+	 2 solutions: keep general expression: use sage to take limit,
+	 or use sage to take inverse laplace.
+	solution1: make product multiplier_array.dot(variable_array): nom/denom ->sage.all.inverse_laplace()
+	solution2: replace all denom differences equalling 0 by sage.var and take limit for each one
+	of them going to 0.
+
+	issue 2: currently assuming checking for whether delta is present in equation has been done.
+	Function will always return an 'inverse', even if taking inverse should be the function itself.
+	
+	:param array multiplier_array: Result of the generating function, with delta_idx column left out
+	:param array delta_in_nom_list: boolean array: Describes which factors contain delta in nominator
+	:param int delta_idx: index of parameter to take inverse of in multiplier_array
+	:param array, list var_array: variable array, with delta left out
+	:param float, object time: floatvalue or sage variable
+	"""
+	#we don't need the delta axis in the multiplier array for most things
+	#either variable array is not same size as multiplier_array
+	#var_array containing float-like objects and objects will create conflicts
+	#how to solve this properly?
+	constants =  multiplier_array.dot(var_array)
+	constants_denom = constants[:,1]
+	pairwise_differences = constants_denom[:,None] - constants_denom[None,:]
+	#sign of lower triangle needs to be adjusted:
+	i_upper = np.triu_indices(pairwise_differences.shape[-1], 1)
+	pairwise_differences.T[i_upper] = -pairwise_differences.T[i_upper] #adjust sign upper triangle
+	i,j = np.diag_indices(pairwise_differences.shape[-1], ndim=2) 
+	pairwise_differences[i,j] = 1 #adjust diagonal to 1 for product
+	denominators = np.prod(pairwise_differences, axis=-1)
+	if any(d==0 for d in denominators): #any of denominators entries 0:
+		#EXCEPTION
+		raise ZeroDivisionError
+	else:
+		#REGULAR CASE
+		exp_nom = np.exp(-constants_denom*time)
+		constants_nom = constants[:,0]
+		leading_constants = np.prod(constants_nom, initial=1, where=constants_nom!=0, axis=-1)
+		signs = np.ones(constants_nom.shape[0], dtype=np.int8)
+		signs_idxs = np.arange(signs.size, dtype=np.int8)
+		signs = np.negative(signs, where=signs_idxs%2!=0, out=signs) #sign: +/-/+/-/...
+		if not any(delta_in_nom_list): #no delta in nominator
+			signs = (-1)**(len(constants_denom))*signs
+			denominators*=constants_denom
+			nominators = leading_constants * signs * exp_nom
+			extra_term = leading_constants/np.prod(constants_denom)
+			result = nominators/denominators
+			return np.concatenate(([extra_term], result))
+		else: #single delta in nominator
+			signs = -(-1)**(len(constants_denom))*signs
+			nominators = leading_constants * signs * exp_nom
+			return nominators/denominators
+
+def sum_all_but_idx(ar, idx):
+	"""
+	Summing all values across last axis of array except for values at idx
+	"""
+	return np.sum(ar[:,:idx], axis=-1)+np.sum(ar[:,idx+1:],axis=-1)
+
 #representing samples
 def sample_to_str(sample_list):
 	return '/'.join('_'.join(lineage for lineage in pop) for pop in sample_list)
@@ -137,10 +211,10 @@ class GFObject:
 			self.exodus_rate = exodus_rate
 
 	def coalescence_events(self, state_list):
-		"""Returning all possible new population configurations due to coalescence,
+		"""
+		Returning all possible new population configurations due to coalescence,
 		and their respective rates
-		Arguments:
-			state_list {[list]} -- [list of population tuples containing lineages (str)]
+		:param list state_list: list of population tuples containing lineages (str)
 		"""
 		result=[]
 		for idx, (pop, rate) in enumerate(zip(state_list, self.coalescence_rates)):
@@ -151,11 +225,10 @@ class GFObject:
 		return result
 
 	def migration_events(self, state_list):
-		"""Returning all possible new population configurations due to migration events, 
-		and their respective rates
-		BACKWARDS IN TIME
-		Arguments:
-			state_list {[list]} -- [list of population tuples containing lineages(str)]
+		"""
+		Returning all possible new population configurations due to migration events, 
+		and their respective rates, BACKWARDS IN TIME
+		:param list state_list: list of population tuples containing lineages (str)
 		"""
 		result = []
 		if self.migration_direction:
@@ -170,11 +243,10 @@ class GFObject:
 		return result
 		
 	def exodus_events(self, state_list):
-		"""Returning all possible new population configurations due to exodus events,
-		and their respective rates
-		BACKWARDS IN TIME	
-		Arguments:
-			state_list {[list]} -- [list of population tuples containing lineages(str)]
+		"""
+		Returning all possible new population configurations due to exodus events,
+		and their respective rates: BACKWARDS IN TIME	
+		:param list state_list: list of population tuples containing lineages (str)
 		"""
 		result = []
 		if self.exodus_direction:
@@ -189,9 +261,9 @@ class GFObject:
 		return result
 
 	def rates_and_events(self, state_list):
-		"""Returning all possible events, and their respective rates
-		Arguments:
-			state_list {[list]} -- [list of population tuples containing lineages(str)]
+		"""
+		Returning all possible events, and their respective rates
+		:param list state_list: list of population tuples containing lineages (str)
 		"""
 		c = self.coalescence_events(state_list)
 		m = self.migration_events(state_list)
@@ -199,10 +271,10 @@ class GFObject:
 		return c+m+e
 
 	def gf_single_step(self, gf_old, state_list):
-		"""Yields single (tail) recursion step for the generating function
-		Arguments:
-			gf_old {[expression]} -- [result from previous recursion step]
-			state_list {[list]} -- [list of population tuples containing lineages(str)]
+		"""
+		Yields single (tail) recursion step for the generating function
+		:param object gf_old: result from previous recursion step
+		:param list state_list: list of population tuples containing lineages (str)
 		"""
 		current_branches = list(flatten(state_list))
 		numLineages = len(current_branches)
