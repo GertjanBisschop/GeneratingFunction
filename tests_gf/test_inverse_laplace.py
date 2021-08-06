@@ -7,6 +7,7 @@ from timeit import default_timer as timer
 
 import gf.gf as gflib
 import gf.matrix_representation as gfmat
+import gf.partial_fraction_expansion as gfpar
 
 @pytest.mark.inverse_laplace
 class Test_Paths:
@@ -96,3 +97,36 @@ class Test_Paths:
 		gf_mat = list(gfobj.make_gf())
 
 		return (variables_array, gf_mat, numerical)
+
+@pytest.mark.partial_fraction_expansion
+class Test_pfe_algorithm:
+	def test_3poles(self):
+		multiplicities = np.array([2, 3, 2], dtype=np.int8)
+		max_multiplicity = np.max(multiplicities)
+		poles = np.array([-1,-2, -3], dtype = np.int8)
+		B = gfpar.return_beta(poles)
+		A = gfpar.return_binom_coefficients(max_multiplicity)
+		results = gfpar.derive_residues(A, B, multiplicities, max_multiplicity)
+		print(results)
+		expected = np.array([
+			[-1, 0.25, 0],
+			[2, 0, 1],
+			[-1, -0.25, 0]], 
+			dtype = np.float64)
+		assert np.array_equal(results, expected)
+
+	def test_4poles(self):
+		multiplicities = np.array([3, 4, 2, 3], dtype=np.int8)
+		max_multiplicity = np.max(multiplicities)
+		poles = np.array([-1, -2, -3, -4], dtype = np.int8)
+		B = gfpar.return_beta(poles)
+		A = gfpar.return_binom_coefficients(max_multiplicity)
+		results = gfpar.derive_residues(A, B, multiplicities, max_multiplicity)
+		print(results)
+		expected = np.array([
+			[0.18904321, -0.0555556, 0.00925926, 0.0],
+			[0.15625, -0.375, 0.0625, -0.125],
+			[-0.3125, -0.125, 0.0, 0.0],
+			[-0.03279321, -0.01157407, -0.00231481, 0.0]], 
+			dtype = np.float64)
+		assert np.allclose(results, expected)

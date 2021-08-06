@@ -1,0 +1,103 @@
+import numpy as np
+import scipy.linalg
+
+"""
+Partial Fraction Expansion algorithm from
+Y. Ma, J. Yu and Y. Wang, "An Easy Pure Algebraic 
+Method for Partial Fraction Expansion of Rational 
+Functions With Multiple High-Order Poles," in IEEE 
+Transactions on Circuits and Systems I: Regular Papers, 
+vol. 61, no. 3, pp. 803-810, March 2014, 
+doi: 10.1109/TCSI.2013.2283998.
+"""
+
+def return_beta(denominator):
+	return denominator[:,None]-denominator[None,:]
+
+def return_binom_coefficients(n):
+	return scipy.linalg.pascal(n)
+
+def return_first_two(A, B, m1, m2, max_multiplicity=None):
+	result = np.zeros((2, max_multiplicity), dtype=np.float64)
+	m1_idxs = np.arange(1, m1+1,dtype=int)
+	m2_idxs = np.arange(1, m2+1,dtype=int)
+	leading1 = (-np.ones(m1, dtype=int))**(m1-m1_idxs)
+	leading2 = (-np.ones(m2, dtype=int))**(m2-m2_idxs)
+	c1 = A[m2-1,m1-m1_idxs]/B[0,1]**(m1+m2-m1_idxs)
+	c2 = A[m1-1,m2-m2_idxs]/B[1,0]**(m1+m2-m2_idxs)
+	result[0,:c1.size] = leading1 * c1
+	result[1,:c2.size] = leading2 * c2
+	return result
+
+def derive_residues(A, B, multiplicities, max_multiplicity):
+	#check if there are two poles
+	num_poles = multiplicities.size
+	result = np.zeros((num_poles, max_multiplicity))
+	result[0:2] = return_first_two(
+		A,
+		B,
+		multiplicities[0], 
+		multiplicities[1],
+		max_multiplicity
+	)
+	for n in range(3, num_poles+1):
+		result = derive_residues_next(A,B, multiplicities, result, n)
+
+	return result
+
+def derive_residues_temp(A, B, multiplicities, num_poles):
+	max_multiplicity = np.max(multiplicities)
+	interm_result = np.zeros((num_poles, max_multiplicity))
+	interm_result[0:2] = return_first_two(
+		A,
+		B,
+		multiplicities[0], 
+		multiplicities[1],
+		max_multiplicity
+	)
+	result = single_n_1(A, B, multiplicities, interm_result, num_poles)
+	result[-1] = single_n(A,B, multiplicities, interm_result, num_poles)
+	return result
+
+def derive_residues_next(A, B, multiplicities, intermediate_result, num_poles):
+	result = np.zeros_like(intermediate_result)
+	for i, multiplicity in enumerate(multiplicities[:num_poles-1]):
+		for L in range(multiplicity):
+			beta = B[i, num_poles-1]**(np.float64(multiplicities[num_poles-1] - (L + 1)))
+			leading_ones = (-1)**(L + 1)
+			temp = 0
+			for j in range(L, multiplicity):
+				temp+=intermediate_result[i,j]*A[multiplicities[num_poles-1]-1, j-L]/(B[num_poles-1,i]**(j+1))
+			result[i,L] = leading_ones * temp / beta
+	
+	for L in range(multiplicities[num_poles-1]):
+		for i in range(num_poles-1):
+			temp = 0
+			beta = B[i, num_poles-1]**(np.float64(multiplicities[num_poles-1] - (L + 1)))
+			for j in range(multiplicities[i]):
+				temp+=intermediate_result[i,j] * A[j, multiplicities[num_poles -1] - (L + 1)]/(B[num_poles-1,i]**(j+1))    
+			result[num_poles-1, L]+=temp/beta
+	return result
+
+def single_n_1(A, B, multiplicities, intermediate_result, num_poles):
+	results = np.zeros_like(intermediate_result)
+	for i, multiplicity in enumerate(multiplicities[:num_poles-1]):
+		for L in range(multiplicity):
+			beta = B[i, num_poles-1]**(np.float64(multiplicities[num_poles-1] - (L + 1)))
+			leading_ones = (-1)**(L + 1)
+			temp = 0
+			for j in range(L, multiplicity):
+				temp+=intermediate_result[i,j]*A[multiplicities[num_poles-1]-1, j-L]/(B[num_poles-1,i]**(j+1))
+			results[i,L] = leading_ones * temp / beta
+	return results
+
+def single_n(A, B, multiplicities, intermediate_result, num_poles):
+	result = np.zeros_like(intermediate_result[0])
+	for L in range(multiplicities[num_poles-1]):
+		for i in range(num_poles-1):
+			temp = 0
+			beta = B[i, num_poles-1]**(np.float64(multiplicities[num_poles-1] - (L + 1)))
+			for j in range(multiplicities[i]):
+				temp+=intermediate_result[i,j] * A[j, multiplicities[num_poles -1] - (L + 1)]/(B[num_poles-1,i]**(j+1))    
+			result[L]+=temp/beta
+	return result

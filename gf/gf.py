@@ -133,10 +133,6 @@ def inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom
 	:param array, list var_array: variable array, with delta left out
 	:param float, object time: floatvalue or sage variable
 	"""
-	#we don't need the delta axis in the multiplier array for most things
-	#either variable array is not same size as multiplier_array
-	#var_array containing float-like objects and objects will create conflicts
-	#how to solve this properly?
 	constants =  multiplier_array.dot(var_array)
 	constants_denom = constants[:,1]
 	pairwise_differences = constants_denom[:,None] - constants_denom[None,:]
