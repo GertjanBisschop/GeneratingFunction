@@ -66,7 +66,8 @@ def derive_residues_next(A, B, multiplicities, intermediate_result, num_poles):
 			result[num_poles-1, L]+=temp/beta
 	return result
 
-# numba compiled functions
+# numba compiled functions 
+# jit compilation switched off during testing (see tests_gf.conftest.py)
 @numba.njit(numba.float64[:,:](numba.uint64[:,:], numba.float64[:,:],numba.int64,numba.int64,numba.int64))
 def return_first_two_numba(A, B, m1, m2, max_multiplicity=None):
 	result = np.zeros((2, max_multiplicity), dtype=np.float64)
@@ -75,11 +76,11 @@ def return_first_two_numba(A, B, m1, m2, max_multiplicity=None):
 	leading1 = (-np.ones(m1, dtype=np.int8))**(m1-m1_idxs)
 	leading2 = (-np.ones(m2, dtype=np.int8))**(m2-m2_idxs)
 	c1 = np.zeros(m1, dtype=np.float64)
-    for m1_idx in m1_idxs:
-        c1[m1_idx-1] = A[m2-1,m1-m1_idx]/B[0,1]**(m1+m2-m1_idx)
-    c2 = np.zeros(m2, dtype=np.float64)
-    for m2_idx in m2_idxs:
-        c2[m2_idx-1] = A[m1-1,m2-m2_idx]/B[1,0]**(m1+m2-m2_idx)
+	for m1_idx in m1_idxs:
+		c1[m1_idx-1] = A[m2-1,m1-m1_idx]/B[0,1]**(m1+m2-m1_idx)
+	c2 = np.zeros(m2, dtype=np.float64)
+	for m2_idx in m2_idxs:
+		c2[m2_idx-1] = A[m1-1,m2-m2_idx]/B[1,0]**(m1+m2-m2_idx)
 	result[0,:c1.size] = leading1 * c1
 	result[1,:c2.size] = leading2 * c2
 	return result

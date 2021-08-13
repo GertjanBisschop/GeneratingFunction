@@ -4,6 +4,7 @@ import copy
 import multiprocessing
 import numpy as np
 import sage.all
+import scipy.special
 
 from . import gf as gflib
 
@@ -93,6 +94,49 @@ def tuple_distance(a_tuple, b_tuple):
 
 def sum_tuple_diff(tuple_a, tuple_b):
 	return sum(b-a for a,b in zip(tuple_a, tuple_b))
+
+############################## mutations as events #################################
+
+def balls_in_boxes(n, m, length, positions):
+	"""
+	n balls in m boxes
+	algorithm adapted from https://stackoverflow.com/a/6609080
+	"""
+	if m==0:
+		if n==0:
+			yield np.zeros(length, dtype=int)
+		return
+	for c in itertools.combinations(range(n + m - 1), m - 1):
+		result = np.zeros(length, dtype=int)
+		result[positions] = tuple(b - a - 1 for a, b in zip((-1,) + c, c + (n + m - 1,)))
+		yield result
+
+def multinomial(params):
+	if len(params) == 1:
+		return 1
+	return scipy.special.comb(np.sum(params), params[-1], exact=True) * multinomial(params[:-1])
+
+
+def expand_single_path(path, num_mutations, max_k):
+	"""
+	:param path: array containing branchtype configuration for each factor
+	:param num_mutations: array describing mutation types and counts to occur along path
+	"""
+	marg_bool = num_mutations>max_k
+	result_shape = path.shape[0]
+	if np.any(marg_bool):
+		path = path.copy()
+		path[:, marg_bool] = 0
+		num_mutations = num_mutations.copy()
+		num_mutations[marg_bool] = 0
+	num_positions = np.sum(path, axis=0)
+	positions = np.argwhere(path.T==1)
+	all_generators  = [balls_in_boxes(mut_count, pos_count, result_shape, pos[:,1]) for mut_count, pos_count, pos in zip(num_mutations, num_positions, np.split(positions,np.cumsum(num_positions))[:-1])]    
+	for new_path in itertools.product(*all_generators):
+		temp = np.vstack(new_path).T
+		row_sum = np.sum(temp, axis=1)
+		multinomial_coefficients = np.prod(np.apply_along_axis(multinomial, 1, temp))
+		yield (row_sum, multinomial_coefficients)
 
 
 ############################### old functions ######################################

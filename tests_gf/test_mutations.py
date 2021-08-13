@@ -79,3 +79,53 @@ class Test_mutypetree:
 			(0,0,1,0),(0,0,1,2),(1,0,1,0),(1,0,1,1),(1,0,1,2),
 			(2,0,1,0),(2,0,1,1),(2,0,1,2),(3,0,1,3),(1,0,0,0)])
 		assert expected_result == result
+
+@pytest.mark.muts_events
+class Test_Mutations_Events:
+	@pytest.mark.parametrize("mut_config, exp_array, exp_coefficient",
+		[(np.array([0,0,0,0], dtype=int), np.array([0, 0, 0, 0, 0], dtype=int), 1),
+		(np.array([0,0,0,2], dtype=int), np.array([0, 0, 0, 0, 0], dtype=int), 1),
+		(np.array([0,0,0,1], dtype=int), None, None),
+		])
+	def test_mutations_as_events1(self, mut_config, exp_array, exp_coefficient):
+		max_k_test = np.array([1,1,1,1], dtype=int)
+		paths = np.array([
+			[1,0,0,0],
+			[0,1,0,0],
+			[0,0,1,0],
+			[1,1,1,0],
+			[1,0,1,0]
+			])
+		observed = mutations.expand_single_path(paths, mut_config, max_k_test)
+		if exp_coefficient!=None:
+			for o in observed:
+				assert np.array_equal(o[0], exp_array)
+				assert o[1]==exp_coefficient
+		else:
+			assert len(list(observed))==0
+
+	def test_mutations_as_events2(self):
+		mut_config = np.array([1,2,0,0], dtype=int)
+		max_k_test = np.array([2,2,2,2], dtype=int)
+		paths = np.array([
+			[1,0,0,0],
+			[0,1,0,0],
+			[0,0,1,0],
+			[1,1,1,0],
+			[1,0,1,0]
+			], dtype=int)
+		observed = mutations.expand_single_path(paths, mut_config, max_k_test)
+		expected = [
+				(np.array([0, 0, 0, 2, 1], dtype=int), 1),
+				(np.array([0, 1, 0, 1, 1], dtype=int), 1),
+				(np.array([0, 2, 0, 0, 1], dtype=int), 1),
+				(np.array([0, 0, 0, 3, 0], dtype=int), 3),
+				(np.array([0, 1, 0, 2, 0], dtype=int), 2),
+				(np.array([0, 2, 0, 1, 0], dtype=int), 1),
+				(np.array([1, 0, 0, 2, 0], dtype=int), 1),
+				(np.array([1, 1, 0, 1, 0], dtype=int), 1),
+				(np.array([1, 2, 0, 0, 0], dtype=int), 1)
+			]
+		for o, e in zip(observed, expected):
+			assert np.array_equal(o[0], e[0])
+			assert o[1]==e[1]
