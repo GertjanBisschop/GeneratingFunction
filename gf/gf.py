@@ -5,6 +5,7 @@ import sage.all
 import sys
 
 from . import matrix_representation as gfmat
+from . import partial_fraction_expansion as gfpfe
 
 #auxilliary functions
 def powerset(iterable):
@@ -85,7 +86,7 @@ def sort_mutation_types(branchtypes):
 	else:
 		raise ValueError(f'sort_mutation_types not implemented for {type(branchtypes)}')
 
-#processing generating function
+#processing generating function: inverse laplace
 def inverse_laplace(equation, dummy_variable):
 	return (sage.all.inverse_laplace(subequation / dummy_variable, dummy_variable, sage.all.SR.var('T', domain='real'), algorithm='giac') for subequation in equation)
 
@@ -99,6 +100,42 @@ def return_inverse_laplace(equation, dummy_variable):
     	    )
     else:
     	return equation
+
+def inverse_laplace_PFE(poles, multiplicities, time, binom_coefficients, factorials, use_numba=True):
+	"""
+	:param poles array
+	:param multiplicities array
+	:param time float
+	:param binom_coefficients array Can be precalculated
+	takes care of inverse laplace when there are higher order poles
+	adapt order of poles (and multiplicities) according to following rules
+	1. similar poles should be placed at the end
+	2. very small/large poles compared to rest should come first
+	"""
+	num_poles = len(poles)
+	if num_poles > 1:
+		max_multiplicity = np.max(multiplicities)
+		if use_numba:
+			B = gfpfe.return_beta(poles)
+			expanded_numerators = gfpfe.derive_residues_numba(binom_coefficients, B, multiplicities, max_multiplicity)
+		else:
+			B = gfpfe.return_beta(poles, dtype=object)
+			expanded_numerators = gfpfe.derive_residues(binom_coefficients, B, multiplicities, max_multiplicity, dtype=object)			
+		#expanded numerators is of shape (num_poles, max_multiplicity)
+		inverse_laplace_terms = PFE_to_inverse(expanded_numerators, poles, time, (0, max_multiplicity), factorials[:max_multiplicity])
+		return np.sum(inverse_laplace_terms)
+	elif num_poles == 1:
+		multiplicity = multiplicities[0]
+		return np.sum(PFE_to_inverse(np.ones(1), poles, time, (multiplicity-1, multiplicity), factorials[multiplicity-1]))
+	else:
+		return 1
+
+def PFE_to_inverse(expanded_numerators, poles, time, time_exponents, factorials):
+	#factorials = 1/np.cumprod(np.arange(1,max_multiplicity))
+	#factorials = np.hstack((1, factorials)) #can be precalculated
+	#poles are defined as (delta - (-pole))
+	temp = factorials * time**np.arange(*time_exponents) * expanded_numerators
+	return np.exp(time*poles)[:, None] * temp
 
 def inverse_laplace_single_event_all_temp(multiplier_array, var_array, time, delta_idx, paths):
 	#temp placeholder function
@@ -116,14 +153,14 @@ def inverse_laplace_single_event_all_temp(multiplier_array, var_array, time, del
 
 def inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom_list):
 	"""
-	Inverse laplace of (F/delta, delta, time)
+	Inverse laplace of (F/delta, delta, time) when there are no higher order poles
 	potential issue 1: equality of two constants in the denominator:
-	 2 solutions: keep general expression: use sage to take limit,
+	 3 solutions: keep general expression: use sage to take limit,
 	 or use sage to take inverse laplace.
 	solution1: make product multiplier_array.dot(variable_array): nom/denom ->sage.all.inverse_laplace()
 	solution2: replace all denom differences equalling 0 by sage.var and take limit for each one
 	of them going to 0.
-
+	solution3: this is a higher order pole, use partial fraction expansion algorithm
 	issue 2: currently assuming checking for whether delta is present in equation has been done.
 	Function will always return an 'inverse', even if taking inverse should be the function itself.
 	
@@ -142,14 +179,22 @@ def inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom
 	i,j = np.diag_indices(pairwise_differences.shape[-1], ndim=2) 
 	pairwise_differences[i,j] = 1 #adjust diagonal to 1 for product
 	denominators = np.prod(pairwise_differences, axis=-1)
+	constants_nom = constants[:,0]
+	leading_constants = np.prod(constants_nom, initial=1, where=constants_nom!=0, axis=-1)
 	if any(d==0 for d in denominators): #any of denominators entries 0:
-		#EXCEPTION
-		raise ZeroDivisionError
+		#EXCEPTION -> this means there is a higher order pole, can be solved with pfe!
+		poles, multiplicities = np.unique(constants_denom, return_counts=True)
+		if not any(delta_in_nom_list): #no delta in nominator
+			poles = np.hstack((poles, 0.0))
+			multiplicities = np.hstack((multiplicities, 1))
+		max_multiplicity = np.max(multiplicities)
+		binom_coefficients = gfpfe.return_binom_coefficients(max_multiplicity)
+		factorials = 1/np.cumprod(np.arange(1,max_multiplicity))
+		factorials = np.hstack((1, factorials))
+		return leading_constants * inverse_laplace_PFE(-poles, multiplicities, time, binom_coefficients, factorials, use_numba=False)
 	else:
 		#REGULAR CASE
 		exp_nom = np.exp(-constants_denom*time)
-		constants_nom = constants[:,0]
-		leading_constants = np.prod(constants_nom, initial=1, where=constants_nom!=0, axis=-1)
 		signs = np.ones(constants_nom.shape[0], dtype=np.int8)
 		signs_idxs = np.arange(signs.size, dtype=np.int8)
 		signs = np.negative(signs, where=signs_idxs%2!=0, out=signs) #sign: +/-/+/-/...

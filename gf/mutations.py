@@ -3,10 +3,14 @@ import collections
 import copy
 import multiprocessing
 import numpy as np
+import numba
 import sage.all
 import scipy.special
+import sys
 
 from . import gf as gflib
+from . import matrix_representation as gfmat
+from . import partial_fraction_expansion as gfpfe
 
 def single_partial(ordered_mutype_list, partial):
 		return list(gflib.flatten(itertools.repeat(branchtype,count) for count, branchtype in zip(partial, ordered_mutype_list)))
@@ -95,7 +99,7 @@ def tuple_distance(a_tuple, b_tuple):
 def sum_tuple_diff(tuple_a, tuple_b):
 	return sum(b-a for a,b in zip(tuple_a, tuple_b))
 
-############################## mutations as events #################################
+############################## mutations as events: expanding gf #################################
 
 def balls_in_boxes(n, m, length, positions):
 	"""
@@ -116,6 +120,29 @@ def multinomial(params):
 		return 1
 	return scipy.special.comb(np.sum(params), params[-1], exact=True) * multinomial(params[:-1])
 
+@numba.njit()
+def multinomial_along_dims(A):
+	result = np.zeros(A.shape[0], dtype=np.int64)
+	for idx, row in enumerate(A):
+		result[idx] = multinomial_numba(row)
+	return result
+
+@numba.njit()
+def multinomial_numba(lst):
+	res = 1
+	i = np.sum(lst)
+	for a in lst:
+		for j in range(1,a+1):
+			res *= i
+			res //= j
+			i -= 1
+	return res
+
+def expand_all_columns_of_path(path, num_mutations):
+	result_shape = path.shape[0]
+	num_positions = np.sum(path>0, axis=0)
+	positions = np.argwhere(path.T>0)
+	return [balls_in_boxes(mut_count, pos_count, result_shape, pos[:,1]) for mut_count, pos_count, pos in zip(num_mutations, num_positions, np.split(positions,np.cumsum(num_positions))[:-1])]	
 
 def expand_single_path(path, num_mutations, max_k):
 	"""
@@ -123,21 +150,234 @@ def expand_single_path(path, num_mutations, max_k):
 	:param num_mutations: array describing mutation types and counts to occur along path
 	"""
 	marg_bool = num_mutations>max_k
-	result_shape = path.shape[0]
+	#result_shape = path.shape[0]
 	if np.any(marg_bool):
 		path = path.copy()
 		path[:, marg_bool] = 0
 		num_mutations = num_mutations.copy()
 		num_mutations[marg_bool] = 0
-	num_positions = np.sum(path, axis=0)
-	positions = np.argwhere(path.T==1)
-	all_generators  = [balls_in_boxes(mut_count, pos_count, result_shape, pos[:,1]) for mut_count, pos_count, pos in zip(num_mutations, num_positions, np.split(positions,np.cumsum(num_positions))[:-1])]    
+	all_generators = expand_all_columns_of_path(path, num_mutations)
+	sum_theta_coeff = np.sum(path, axis=1)
 	for new_path in itertools.product(*all_generators):
 		temp = np.vstack(new_path).T
-		row_sum = np.sum(temp, axis=1)
-		multinomial_coefficients = np.prod(np.apply_along_axis(multinomial, 1, temp))
-		yield (row_sum, multinomial_coefficients)
+		multiplicities = np.sum(temp, axis=1) #returns multiplicities
+		multinomial_coefficients = np.prod(multinomial_along_dims(temp))
+		#product of non-zero theta coeff
+		theta_coefficients = path**temp
+		mask_mutations_placed = theta_coefficients[temp>0] #if temp>0, then path[temp]>0
+		if mask_mutations_placed.size==0:
+			prod_theta_coeff = 0
+		else:
+			prod_theta_coeff = np.prod(mask_mutations_placed) 
+		theta_sum_and_multiplicities = np.vstack((sum_theta_coeff, multiplicities)).T
+		yield (theta_sum_and_multiplicities, prod_theta_coeff, multinomial_coefficients)
 
+def expand_all_paths(multiplier_array, all_paths, all_mutypes, max_k, delta_idx, max_expansion_size):
+	#constants
+	num_mutypes = len(max_k)
+	num_paths = len(all_paths)
+	eq_idx = 0
+	max_path_size = np.max([len(path) for path in all_paths])
+	#views of multiplier_array
+	eq_has_no_delta = multiplier_array[:, 1, delta_idx]==0 #no delta in denominator
+	prepare_for_inversion = ~np.all(eq_has_no_delta)
+	numerator_has_no_delta = multiplier_array[:, 0, delta_idx]==0 #no delta in numerator
+	#arrays to populate with results
+	constants_pre_expansion = np.zeros(
+		(*max_k+2, num_paths, max_expansion_size, 2, multiplier_array.shape[-1]-num_mutypes), dtype=np.uint64
+		) #contains for each mutype and for each path an array with coefficients and an array with multiplicities for all variables
+	constants_multinom_coeffs = np.zeros((*max_k+2, num_paths, max_expansion_size), dtype=np.uint64)
+	eq_matrix = np.zeros((num_paths*np.prod(max_k+2)*max_expansion_size, max_path_size+1, multiplier_array.shape[-1]-num_mutypes+1), dtype=np.uint8) #last entry of last dimension is multiplicity
+	#eq_matrix = list()
+	paths_by_mutype = -np.ones((*max_k+2, num_paths, max_expansion_size, 2), dtype=np.int64)
+	#dicts
+	eq_dict = dict()
+	#shape of empty array will be different if no delta_idx!
+	_, eq_idx = get_unique_idx(np.zeros((0, multiplier_array.shape[-1]-num_mutypes+1), dtype=np.uint64), eq_dict, eq_matrix, eq_idx)
+
+	for path_idx, path in enumerate(all_paths):
+		numerator_has_no_delta_path = np.all(numerator_has_no_delta[path])
+		path_numerator_no_delta, path_denominator_no_delta = np.squeeze(np.vsplit(np.swapaxes(np.delete(multiplier_array[path], delta_idx, -1), 0, 1), 2))
+		constants_pre_expansion_path = split_off_constant_term(path_numerator_no_delta[:, :-num_mutypes])
+		for mutype in all_mutypes:
+			num_mutations = sum((m for m,k in zip(mutype, max_k) if m<=k))
+			for expanded_path_idx, (theta_sum_and_multiplicities, prod_theta_coeff, multinomial_coefficients) in enumerate(expand_single_path(path_denominator_no_delta[:, -num_mutypes:], np.array(mutype), max_k)):
+				#add constants to correct array
+				constants_pre_expansion[mutype][path_idx, expanded_path_idx, :, :-1] = constants_pre_expansion_path
+				constants_pre_expansion[mutype][path_idx,expanded_path_idx, :, -1] = (prod_theta_coeff, num_mutations)
+				constants_multinom_coeffs[(*mutype, path_idx, expanded_path_idx)] = multinomial_coefficients
+				#unique equations and make paths for each mutype
+				new_eq_for_path_split = factorize_expanded_path(path_denominator_no_delta, theta_sum_and_multiplicities, num_mutypes, eq_has_no_delta[path])
+				delta_no_delta_tuple, eq_idx = get_unique_idx_tuple_for_path(new_eq_for_path_split, eq_dict, eq_matrix, eq_idx, numerator_has_no_delta_path, prepare_for_inversion)
+				#paths_by_mutype[mutype].append(delta_no_delta_tuple)
+				paths_by_mutype[(*mutype, path_idx, expanded_path_idx)] = delta_no_delta_tuple
+	
+	#num_uniques_to_invert = len(set(t[0] for big_t in paths_by_mutype.values() for t in big_t))
+	#print(num_uniques_to_invert)
+	
+	return (eq_matrix[:eq_idx+1], constants_multinom_coeffs, constants_pre_expansion, paths_by_mutype)
+
+def expand_all_paths_no_delta(multiplier_array, all_paths, all_mutypes, max_k, max_expansion_size):
+	#temp function!
+	#constants
+	num_mutypes = len(max_k)
+	num_paths = len(all_paths)
+	eq_idx = 0
+	max_path_size = np.max([len(path) for path in all_paths])
+	#views of multiplier_array
+	eq_has_no_delta = np.ones(multiplier_array.shape[0], dtype=bool)
+	prepare_for_inversion = ~np.all(eq_has_no_delta)
+	#arrays to populate with results
+	numerator_has_no_delta = np.ones(multiplier_array.shape[0], dtype=bool) #no delta in numerator
+	constants_pre_expansion = np.zeros(
+		(*max_k+2, num_paths, max_expansion_size, 2, multiplier_array.shape[-1]-num_mutypes+1), dtype=np.uint64
+		) #contains for each mutype and for each path array with coefficients and array with multiplicities for all variables
+	constants_multinom_coeffs = np.zeros((*max_k+2, num_paths, max_expansion_size), dtype=np.uint64)
+	#eq_matrix = np.zeros((len(all_paths)*2**(num_mutypes+1), max_path_size+1, multiplier_array.shape[-1]-num_mutypes+2), dtype=np.uint8)
+	eq_matrix = np.zeros((num_paths*np.prod(max_k+2)*max_expansion_size, max_path_size+1, multiplier_array.shape[-1]-num_mutypes+2), dtype=np.uint8)
+	paths_by_mutype = -np.ones((*max_k+2, num_paths, max_expansion_size, 2), dtype=np.int64)
+	#dicts
+	eq_dict = dict()
+	_, eq_idx = get_unique_idx(np.zeros((0, eq_matrix[eq_idx].shape[-1]), dtype=np.uint64), eq_dict, eq_matrix, eq_idx)
+
+	for path_idx, path in enumerate(all_paths):
+		numerator_has_no_delta_path = np.all(numerator_has_no_delta[path])
+		path_numerator_no_delta, path_denominator_no_delta = np.squeeze(np.vsplit(np.swapaxes(multiplier_array[path], 0, 1), 2))
+		constants_pre_expansion_path = split_off_constant_term(path_numerator_no_delta[:, :-num_mutypes])
+		for mutype in all_mutypes:
+			num_mutations = sum((m for m,k in zip(mutype, max_k) if m<=k))
+			for expanded_path_idx, (theta_sum_and_multiplicities, prod_theta_coeff, multinomial_coefficients) in enumerate(expand_single_path(path_denominator_no_delta[:, -num_mutypes:], np.array(mutype), max_k)):
+				#add constants to correct array
+				constants_pre_expansion[mutype][path_idx, expanded_path_idx, :, :-1] = constants_pre_expansion_path
+				constants_pre_expansion[mutype][path_idx, expanded_path_idx, :, -1] = (prod_theta_coeff, num_mutations)
+				constants_multinom_coeffs[(*mutype, path_idx, expanded_path_idx)] = multinomial_coefficients
+				#unique equations and make paths for each mutype
+				new_eq_for_path_split = factorize_expanded_path(path_denominator_no_delta, theta_sum_and_multiplicities, num_mutypes, eq_has_no_delta[path])
+				delta_no_delta_tuple, eq_idx = get_unique_idx_tuple_for_path(new_eq_for_path_split, eq_dict, eq_matrix, eq_idx, numerator_has_no_delta_path, prepare_for_inversion)
+				#paths_by_mutype[mutype].append(delta_no_delta_tuple)
+				paths_by_mutype[(*mutype, path_idx, expanded_path_idx)] = delta_no_delta_tuple
+
+	return (eq_matrix[:eq_idx+1], constants_multinom_coeffs, constants_pre_expansion, paths_by_mutype)
+
+def factorize_expanded_path(path_denominator_no_delta, theta_sum_and_multiplicities, num_mutypes, split_condition):
+	new_eq_for_path = np.hstack((path_denominator_no_delta[:, :-num_mutypes], theta_sum_and_multiplicities))		
+	return (new_eq_for_path[~split_condition], new_eq_for_path[split_condition])
+
+def get_unique_idx_tuple_for_path(eq_split, eq_dict, eq_matrix, eq_idx, numerator_no_delta_path, prepare_for_inversion):
+	new_eq_for_path_delta, new_eq_for_path_no_delta = eq_split
+	#deal with new_eq_for_path_delta
+	if numerator_no_delta_path and prepare_for_inversion:
+		#add zero as pole
+		new_eq_for_path_delta = np.vstack((np.zeros_like(new_eq_for_path_delta[-1]), new_eq_for_path_delta))
+	unique_idx_delta, eq_idx = get_unique_idx(new_eq_for_path_delta, eq_dict, eq_matrix, eq_idx) 
+	#deal with new_eq_for_path_no_delta
+	unique_idx_no_delta, eq_idx = get_unique_idx(new_eq_for_path_no_delta, eq_dict, eq_matrix, eq_idx)
+	return ((unique_idx_delta, unique_idx_no_delta), eq_idx)
+
+def get_unique_idx(eq, eq_dict, eq_matrix, eq_idx):
+	eq_tuple = tuple(sorted(tuple(map(tuple, eq)))) #sorting to avoid fact that same equations in different order map to different hash
+	if eq_tuple in eq_dict:
+		unique_idx = eq_dict[eq_tuple]
+	else:
+		eq_dict[eq_tuple] = eq_idx
+		eq_matrix[eq_idx, :eq.shape[0]] = eq
+		unique_idx = eq_idx
+		eq_idx+=1
+	return (unique_idx, eq_idx)
+
+def split_off_constant_term(numerators):
+	result = np.zeros((2, numerators.shape[-1]), dtype=np.uint64)
+	result[0] = prod_with_zeros.reduce(numerators, axis=0)
+	result[1] = np.sum(numerators>0, axis=0)
+	return result
+
+@numba.vectorize([numba.uint8(numba.uint8, numba.uint8),
+				numba.uint16(numba.uint16, numba.uint16),
+				numba.uint32(numba.uint32, numba.uint32),
+				numba.uint64(numba.uint64, numba.uint64),
+				numba.float64(numba.float64, numba.float64)])
+def prod_with_zeros(x,y):
+	#only return 0 if both x and y are zero
+    temp = x*y
+    if temp==0:
+        if x==0:
+            if y==0:
+                return 0
+            else:
+                return y
+        else:
+            return x
+    else:
+        return temp
+
+@numba.njit()
+def trim_zeros_numba(arr):
+	#for 2-d arrays
+    temp = np.ones(arr.shape[0], dtype=bool)
+    for idx in range(1, arr.shape[0]):
+        temp[idx] = ~np.all(arr[idx]==0)
+    return arr[temp]
+
+def return_split_condition(paths_by_mutype):
+	return (np.unique(paths_by_mutype[..., 0]), np.unique(paths_by_mutype[..., 1]))
+
+########### evaluating equations into values and combining them into a result #################
+
+def eval_constants(constants_multinom_coeffs, constants_pre_expansion, variable_array):
+	#constants_pre_expansion dimensions: (*mutype, paths, 2, num_vars)
+	constants_pre_expansion = constants_pre_expansion[..., 0, :]*(variable_array**constants_pre_expansion[..., 1, :]) 
+	constants_pre_expansion = prod_with_zeros.reduce(constants_pre_expansion, axis=-1)
+	#single constants_pre_expansion can be 0, but never all of them (always need coalescence)
+	return constants_pre_expansion * constants_multinom_coeffs
+
+def eval_equations(eq_matrix, eq_split, variable_array, time, binom_coefficients, factorials):
+	#first entry of eq_matrix should be (1, 1), last entry (0, 0)
+	#eq_split should be list containing two arrays with bools indicating how each of the equations should be evaluated
+	eq_to_invert, eq_not_to_invert = eq_split #should not contain first equation, evaluates to 1
+	eq_matrix_results = np.zeros((eq_matrix.shape[0], 2), dtype=np.float64) 
+	#eq with only zeros should evaluate to 1
+	eq_matrix_results[0] = (1, 1)
+	eq_matrix_results[eq_to_invert, 0] = _eval_equations_to_invert(eq_matrix[eq_to_invert], variable_array, time, binom_coefficients, factorials)
+	eq_matrix_results[eq_not_to_invert, 1] = _multiply_with_var_array(eq_matrix[eq_not_to_invert], variable_array)
+	#add row of zeros for matrix entries without result
+	eq_matrix_results = np.vstack((eq_matrix_results, np.zeros((1, 2)))) #can be improved!
+	return eq_matrix_results
+
+def eval_mutype_paths(paths_by_mutype, evaluated_eqs):
+	result = np.zeros_like(paths_by_mutype, dtype = np.float64)
+	result[..., 0] = evaluated_eqs[paths_by_mutype[..., 0], 0]
+	result[..., 1] = evaluated_eqs[paths_by_mutype[..., 1], 1]
+	return np.prod(result, axis=-1) #implementation without taking into account potential floating point precision issues!
+
+def eval_gf_with_mutations(paths_by_mutype, constants_multinom_coeffs, constants_pre_expansion, eq_matrix, eq_split, variable_array, time, binom_coefficients=None, factorials=None):
+	#variable array is array without delta!
+	constants = eval_constants(constants_multinom_coeffs, constants_pre_expansion, variable_array)
+	evaluated_equations = eval_equations(eq_matrix, eq_split, variable_array, time, binom_coefficients, factorials)
+	evaluated_mutype_paths = eval_mutype_paths(paths_by_mutype, evaluated_equations)
+	return constants * evaluated_mutype_paths #this needs to be summed across paths and expansions
+
+def _multiply_with_var_array(eq_matrix, variable_array):
+	#note: multiplicity of poles is always 1 less than what it should be
+	result = (eq_matrix[..., :-1].dot(variable_array))**(eq_matrix[..., -1]+1)
+	#can this contain zeros!? axis=-1 represents max_path_size
+	result = 1/prod_with_zeros.reduce(result, axis=-1) #multiply factors within single equation
+	return result
+
+def _eq_to_poles_multiplicity(eq_matrix, variable_array):
+	#note: multiplicity is always 1 less than what it should be!
+	#note poles to be used are -poles
+	return (-eq_matrix[..., :-1].dot(variable_array), eq_matrix[..., -1]+1)
+
+def _eval_equations_to_invert(eq_matrix, variable_array, time, binom_coefficients, factorials):
+	eq_matrix_shape = eq_matrix.shape[0]
+	eq_matrix_temp = np.zeros(eq_matrix_shape, dtype=np.float64)
+	for idx in range(eq_matrix_shape):
+		#trimming zeros should be temporary solution! Alternatively, simply store array shape for each eq
+		temp = trim_zeros_numba(eq_matrix[idx])
+		to_invert = _eq_to_poles_multiplicity(temp, variable_array)  
+		#remember: multiplicity of poles is always 1 less than what it should be
+		eq_matrix_temp[idx] = gflib.inverse_laplace_PFE(*to_invert, time, binom_coefficients, factorials)
+	return eq_matrix_temp
 
 ############################### old functions ######################################
 
