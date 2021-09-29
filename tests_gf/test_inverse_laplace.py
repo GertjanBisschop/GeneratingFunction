@@ -50,7 +50,7 @@ class Test_Paths:
 		if numerical: #numerical evaluation needed
 			assert np.isclose(float(v1.subs(params_dict)), float(v2.subs(params_dict)))
 		else:
-			assert v1==v1
+			assert v1==v2
 
 	@pytest.fixture(
 		scope='class', 
@@ -130,3 +130,70 @@ class Test_pfe_algorithm:
 			[-0.03279321, -0.01157407, -0.00231481, 0.0]], 
 			dtype = np.float64)
 		assert np.allclose(results, expected)
+
+@pytest.mark.partial_fraction_expansion
+class Test_inverse_with_pfe_algorithm:
+	def test_4poles(self):
+		time = 4.0
+		multiplicities = np.array([3, 4, 2, 3], dtype=np.int8)
+		max_multiplicity = np.max(multiplicities)
+		poles = np.array([-1, -2, -3, -4], dtype = np.int8)
+		B = gfpar.return_beta(poles)
+		A = gfpar.return_binom_coefficients(max_multiplicity)
+		factorials = 1/np.cumprod(np.arange(1,max_multiplicity))
+		factorials = np.hstack((1, factorials))
+		result = gflib.inverse_laplace_PFE(poles, multiplicities, time, A, factorials)
+		print(result)
+		assert np.isclose(0.0000136859, result)
+
+	def test_1poles(self):
+		time = 4.0
+		multiplicities = np.array([4], dtype=np.int8)
+		poles = np.array([-1], dtype = np.int8)
+		factorials = 1/np.cumprod(np.arange(1,multiplicities[0]))
+		factorials = np.hstack((1, factorials))
+		A = gfpar.return_binom_coefficients(multiplicities[0])
+		result = gflib.inverse_laplace_PFE(poles, multiplicities, time, A, factorials)
+		print(result)
+		assert np.isclose(0.195367, result)
+
+	def test_0poles(self):
+		time = 4.0
+		multiplicities = np.array([], dtype=np.int8)
+		poles = np.array([], dtype = np.int8)
+		factorials = 1/np.cumprod(np.arange(1,2))
+		factorials = np.hstack((1, factorials))
+		A = gfpar.return_binom_coefficients(2)
+		result = gflib.inverse_laplace_PFE(poles, multiplicities, time, A, factorials)
+		print(result)
+		assert np.isclose(1.0, result)
+
+@pytest.mark.partial_fraction_expansion
+class Test_laplace_single_event_higher_order_poles:
+	def test_laplace_higher_order_poles(self):
+		multiplier_array = np.array(
+			[[[1,0,0,0],[1,1,1,1]],
+			[[0,1,0,0],[1,1,1,1]],
+			[[0,0,1,0],[1,1,1,1]]
+			]) 
+		var_array = np.arange(1,5, dtype=np.float64)
+		time = 0.25
+		delta_in_nom_list = np.ones(multiplier_array.shape[0], dtype=bool)
+		result = gflib.inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom_list)
+		print(result)
+		exp_result = 0.0153909
+		assert np.isclose(exp_result, result)
+
+	def test_laplace_higher_order_poles2(self):
+		multiplier_array = np.array(
+			[[[1,0,0,0],[1,1,1,1]],
+			[[0,1,0,0],[1,1,1,1]],
+			[[0,0,1,0],[1,1,1,1]]
+			]) 
+		var_array = np.arange(1,5, dtype=np.float64)
+		time = 0.25
+		delta_in_nom_list = np.zeros(multiplier_array.shape[0], dtype=bool)
+		result = gflib.inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom_list)
+		print(result)
+		exp_result = 0.00273712
+		assert np.isclose(exp_result, result)
