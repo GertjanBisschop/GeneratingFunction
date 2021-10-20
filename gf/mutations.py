@@ -106,8 +106,8 @@ def depth_first_mutypes(max_k, labels, eq, theta, rate_dict, exclude=None, preci
 	k = len(max_k) - 1
 	stack = [(tuple([0 for _ in range(len(max_k))]), k, eq),]
 	result = np.zeros(max_k+2, dtype=np.float64)
-	if exclude==None:
-		exclude=()
+	if exclude is None:
+		exclude = tuple()
 	while stack:
 		mutype, k, eq = stack.pop()
 		if k>0:
@@ -143,13 +143,13 @@ def single_step_df_mutypes_diff(mutype, label, k, max_k, eq, theta, exclude):
 	# for i==0
 	yield (mutype, k-1, eq.subs(subsdict))
 	if len(exclude)==0 or (k!=exclude[0] or mutype[exclude[1]]==0):
-		new_eq = sage.all.diff(eq, label)
+		new_eq = eq
 		#for i 1 .. max_k
 		temp = list(mutype)
 		for i in range(1, max_k+1):
 			temp[k] = i
-			yield (tuple(temp), k-1, new_eq.subs(subsdict))
 			new_eq = sage.all.diff(new_eq, label)
+			yield (tuple(temp), k-1, new_eq.subs(subsdict))
 		
 		#for i==max_k+1
 		subsdict[label] = 0
