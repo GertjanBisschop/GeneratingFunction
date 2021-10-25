@@ -5,6 +5,22 @@ import math
 from collections import deque
 
 #derivatives base functions:
+@numba.njit([
+	numba.float64(numba.uint8[:], numba.float64[:]),
+	numba.float64(numba.uint16[:], numba.float64[:]),
+	numba.float64(numba.uint32[:], numba.float64[:]),
+	numba.float64(numba.int8[:], numba.float64[:]),
+	numba.float64(numba.int16[:], numba.float64[:]),
+	numba.float64(numba.int32[:], numba.float64[:]),
+	])
+def simple_dot_product(A, B):
+    m = A.size
+    p = B.size
+    s = 0
+    for i in range(m):
+        s += A[i]*B[i]
+    return s
+
 @numba.njit
 def taylor_coeff_inverse_polynomial(denom, var_array, diff_array, num_branchtypes):
 	#of the form c/f(var_array)
@@ -14,11 +30,17 @@ def taylor_coeff_inverse_polynomial(denom, var_array, diff_array, num_branchtype
 	for num in diff_array:
 		fact_diff*=math.gamma(num + 1)
 	fact = math.gamma(total_diff_count + 1)/fact_diff
-	dot_product = np.zeros(2, dtype=np.float64)
-	dot_product[0] = denom[:-num_branchtypes].dot(var_array[:-num_branchtypes])
-	dot_product[1] = denom[-num_branchtypes:].dot(var_array[-num_branchtypes:])
+	dot_product = simple_dot_product(denom, var_array)
+	#dot_product = np.zeros(2, dtype=np.float64)
+	#dot_product[0] = denom[:-num_branchtypes].dot(var_array[:-num_branchtypes])
+	#dot_product[1] = denom[-num_branchtypes:].dot(var_array[-num_branchtypes:])
 	nomd = fact * np.prod(denom[-num_branchtypes:]**diff_array)
-	denomd = np.sum(dot_product)**(total_diff_count + 1)
+	denomd = dot_product**(total_diff_count + 1)
+	if denomd==0.0:
+		#denomd can be zero!
+		#pole with higher order multiplicity!
+		raise ZeroDivisionError
+	#denomd = np.sum(dot_product)**(total_diff_count + 1)
 	return (-1)**(total_diff_count) * nomd/denomd
 
 @numba.njit
@@ -135,10 +157,12 @@ def all_polynomials(eq_matrix, shape, var_array, num_branchtypes):
 
 @numba.njit
 def all_exponentials(eq_matrix, shape, var_array, time, num_branchtypes):
+	#eq_matrix contains only denominators!
 	num_equations = eq_matrix.shape[0]
 	result = np.zeros((num_equations, *shape), dtype=np.float64)
 	for idx, eq in enumerate(eq_matrix):
-		exponential_part = np.exp(-time*eq.dot(var_array))
+		exponential_part = np.exp(-time*simple_dot_product(eq, var_array))
+		#exponential_part = np.exp(-time*eq.dot(var_array))
 		for mutype in np.ndindex(shape):
 			#mutype = np.array(mutype, dtype=np.uint8)
 			result[(idx, *mutype)] = taylor_coeff_exponential(-time, eq, exponential_part, mutype, num_branchtypes)
@@ -156,6 +180,7 @@ def product_pairwise_diff_inverse_polynomial(polynomial_f, shape, combos, subset
 		return result
 
 def eq_matrix_subtract(eq_matrix):
+	eq_matrix = eq_matrix.astype(np.int64)
 	n, num_variables = eq_matrix.shape
 	num_comparisons = n*(n-1)//2
 	result = np.zeros((num_comparisons, num_variables), dtype=eq_matrix.dtype)
@@ -180,7 +205,7 @@ def compile_inverted_eq(eq_matrix, shape, subsetdict, delta_in_nom):
 	#note we need to add np.zeros(eq_matrix.shape[-1], dtype=int) 
 	#to eq_matrix if no delta in numerator
 	#polyf poles should be pairwise differences n*(n-1)/2 for n poles
-	eq_matrix = eq_matrix.astype(np.float64) #required for numba dot product
+	#eq_matrix = eq_matrix.astype(np.float64) #required for numba dot product
 	num_branchtypes = len(shape)
 	numerators_eq = eq_matrix[:, 0]
 	denominators_eq = eq_matrix[:, 1]
@@ -217,7 +242,7 @@ def compile_inverted_eq(eq_matrix, shape, subsetdict, delta_in_nom):
 
 def compile_non_inverted_eq(eq_matrix, shape):
 	num_branchtypes = len(shape)
-	eq_matrix = eq_matrix.astype(np.float64) #required for numba dot product
+	#eq_matrix = eq_matrix.astype(np.float64) #required for numba dot product
 	def _make_eq(var):
 		if eq_matrix.shape[0]==0:
 			return np.zeros((0, *shape), dtype=np.float64)
@@ -228,27 +253,17 @@ def compile_non_inverted_eq(eq_matrix, shape):
 		return result
 	return _make_eq
 
-#parsing state_space_graph
-#input: eq_matrix
-#all_paths in shape: [((to_invert), (not_to_invert)), ((to_invert), (not_to_invert)), ...]
-
-#given set eq_array and to_invert_array:
-#subset = to_invert_array == False
-#f_non_inverted(eq_matrix[subset])
-#f_inverted(eq_matrix[i] for i in to_invert_array==True)
-
-#next step: given single point in parameter_space:
-#f_non_inverted returns 1 array of size (x, *k_max)
-#f_inverted returns single array for each of the points
-#goal: iterate through graph
-
 def prepare_graph_evaluation(eq_matrix, to_invert_array, eq_array, shape, delta_idx, subsetdict):
-	eq_matrix_no_delta = np.delete(eq_matrix, delta_idx, axis=2)	
+	if delta_idx is None:
+		eq_matrix_no_delta = eq_matrix
+	else:		
+		eq_matrix_no_delta = np.delete(eq_matrix, delta_idx, axis=2)	
 	not_to_invert = np.zeros(np.sum(~to_invert_array) ,dtype=int)
-	i=0
-	while not to_invert_array[i]:
-		not_to_invert[i] = eq_array[i][0]
-		i+=1
+	for i, to_invert in enumerate(to_invert_array):
+		if not to_invert:
+			not_to_invert[i] = eq_array[i][0]
+		else:
+			break
 	f_non_inverted = compile_non_inverted_eq(eq_matrix_no_delta[not_to_invert], shape)
 	f_inverted = []
 	for idx in range(i, len(to_invert_array)):
@@ -324,15 +339,10 @@ def resolve_dependencies(graph):
 	return np.array(stack, dtype=np.uint64)
 
 def iterate_graph(sequence, graph, adjacency_matrix, evaluated_eqs, subsetdict):
-	#what if graph has multiple end points!?
-	#for validation purposes:
-	#visited = np.zeros(len(sequence), dtype=np.uint8)
-	#visited[sequence[0]] = 1
 	shape = evaluated_eqs[0].shape
 	num_nodes = len(sequence)
 	node_values = np.zeros((num_nodes, *shape), np.float64)
 	for parent in sequence:
-		#visited[parent] = 1
 		children = graph[parent]
 		temp = np.zeros(shape, dtype=np.float64)
 		for child in children:

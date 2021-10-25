@@ -139,7 +139,7 @@ def return_symbolic_result(eq, subs_dict, branchtypes, shape, root=(0,0)):
 
 @pytest.mark.collapse
 class Test_collapse_graph:
-	def test_collapse_graph(self, gfobject):
+	def test_collapse_graph(self):
 		graph_array = ((1,2,4,5),(2,),(3,),(6,),(3,),(3,),tuple())
 		eq_matrix = np.array([
 			[[0,0],[0,1]],
@@ -170,60 +170,6 @@ class Test_collapse_graph:
 		compare(expected_graph_array, collapsed_graph_array)
 		compare(expected_eq_array, eq_array)
 		assert np.array_equal(expected_to_invert_array, to_invert_array)
-
-	def test_make_graph(self, gfobject):
-		gfObj, delta_idx, = gfobject
-		graph_array, adjacency_matrix, eq_matrix = gfObj.make_graph()
-		paths, equations = gfObj.make_gf()
-		check_paths = gfdiff.paths(graph_array, adjacency_matrix)
-		for result, expected in zip(check_paths, paths):
-			assert np.array_equal(np.array(result), np.array(expected))
-
-	@pytest.fixture(
-	scope='class', 
-	params=[
-		([(1,2,0)], sage.all.SR.var('E'), None, None),
-		#(None, None, [(2,1)], sage.all.SR.var('M')),
-		#([(1,2,0)], sage.all.SR.var('E'), [(2,1)], sage.all.SR.var('M'))
-		],
-	ids=[
-		'DIV',
-		#'MIG', 
-		#'IM'
-		],
-	)
-	def gfobject(self, request):
-		sample_list = [(),('a','a'),('b','b')]
-		ancestral_pop = 0
-		coalescence_rates = (sage.all.SR.var('c0'), sage.all.SR.var('c1'), sage.all.SR.var('c2'))
-		coalescence_rate_idxs = (0, 1, 2)
-		k_max = {'m_1':2, 'm_2':2, 'm_3':2, 'm_4':2}
-		mutype_labels, max_k = zip(*sorted(k_max.items()))
-		branchtype_dict_mat = gfmat.make_branchtype_dict_idxs(sample_list, mapping='unrooted', labels=mutype_labels)
-		exodus_direction, exodus_rate, migration_direction, migration_rate = request.param
-		
-		variables_array = list(coalescence_rates)
-		migration_rate_idx, exodus_rate_idx = None, None
-		if migration_rate!=None:
-			migration_rate_idx = len(variables_array)
-			variables_array.append(migration_rate)
-		if exodus_rate!=None:
-			exodus_rate_idx = len(variables_array)
-			variables_array.append(exodus_rate)
-		variables_array += [sage.all.SR.var(m) for m in mutype_labels]
-		variables_array = np.array(variables_array, dtype=object)
-		
-		gfobj = gflib.GFMatrixObject(
-			sample_list,
-			coalescence_rate_idxs, 
-			branchtype_dict_mat,
-			exodus_rate=exodus_rate_idx,
-			exodus_direction=exodus_direction,
-			migration_rate=migration_rate_idx,
-			migration_direction=migration_direction
-			)
-
-		return (gfobj, exodus_rate_idx)
 
 	@pytest.mark.parametrize(
 		'sample_list, k_max, branchtype_dict, exp_graph_array',
@@ -267,17 +213,44 @@ class Test_taylor2:
 		theta_array = np.full(size-1, fill_value=theta)
 		variable_array = np.hstack((variable_array, theta_array))
 		time = 1.5
-
 		ordered_mutype_list = [sage.all.SR.var(f'm_{idx}') for idx in range(1,size)]
 		num_mutypes = len(ordered_mutype_list)
 		alt_variable_array = np.hstack((variable_array[:2], np.array(ordered_mutype_list)))
-		
 		result = self.evaluate_graph(gfobj, shape, theta, variable_array, time)
 		print(result)
 		exp_result = self.evaluate_symbolic_equation(gfobj, ordered_mutype_list, max_k, theta, alt_variable_array, time)
-		print(exp_result)
 		subidx = tuple([slice(0,s) for s in shape])
+		print(exp_result[subidx])
 		assert np.allclose(exp_result[subidx], result)
+
+	def test_IM_models(self, get_IM_gfobject):
+		gfobj, variable_array = get_IM_gfobject
+		num_variables = gfobj.num_variables if gfobj.exodus_rate is None else gfobj.num_variables-1
+		max_k = np.array([2,2,2,2], dtype=int)
+		ordered_mutype_list = [sage.all.SR.var(f'm_{idx}') for idx in range(1,len(max_k)+1)]
+		shape = tuple(max_k+1)
+		#variables depending on model: c0, c1, c2, M, E
+		#variable_array = (np.arange(1,num_variables+1)/10).astype(np.float64)
+		#variable_array = np.array([1.0, 0.5, 0.9, 0.001], dtype=np.float64)[:num_variables]
+		theta = .51
+		theta_array = np.full(len(max_k), fill_value=theta)
+		var = np.hstack((variable_array, theta_array))
+		#var_symbolic = np.hstack((variable_array, ordered_mutype_list))
+		if gfobj.exodus_rate is not None:
+			var_sage = np.zeros(gfobj.num_variables, dtype=object)
+			var_sage[:-1] = [sage.all.Rational(v) for v in variable_array]
+			var_sage[-1] = sage.all.SR('E')
+			var_symbolic = np.hstack((var_sage, ordered_mutype_list))
+		else:
+			var_symbolic = np.hstack((variable_array, ordered_mutype_list))
+		time = 1.5
+		
+		result = self.evaluate_graph(gfobj, shape, theta, var, time)
+		expected_result = self.evaluate_symbolic_equation(gfobj, ordered_mutype_list, max_k, theta, var_symbolic, time, sage_inverse=True)
+		print(result)
+		subidx = tuple([slice(0,s) for s in shape])
+		print(expected_result[subidx])
+		assert np.allclose(expected_result[subidx], result)
 
 	def get_gf_no_mutations(self, size):
 		sample_list = [(), ('a',)*size]
@@ -329,14 +302,64 @@ class Test_taylor2:
 		assert final_result.shape==multiplier_matrix.shape
 		return multiplier_matrix * final_result
 
-	def evaluate_symbolic_equation(self, gfobj, ordered_mutype_list, max_k, theta, var, time):
+	def evaluate_symbolic_equation(self, gfobj, ordered_mutype_list, max_k, theta, var, time, sage_inverse=False):
+		theta = sage.all.Rational(theta)
 		rate_dict = {b:theta for b in ordered_mutype_list}
 		paths, eq_matrix = gfobj.make_gf()
-		alt_eqs = equations_from_matrix_with_inverse(eq_matrix, paths, var, time, gfobj.exodus_rate)
-		alt_gf = sum(alt_eqs)
-		rate_dict = {b:theta for b in ordered_mutype_list}
-		result = mutations.depth_first_mutypes(max_k, ordered_mutype_list, alt_gf, theta, rate_dict)
+		if not sage_inverse:
+			alt_eqs = equations_from_matrix_with_inverse(eq_matrix, paths, var, time, gfobj.exodus_rate)
+		else:
+			alt_eqs = equations_with_sage(eq_matrix, paths, var, sage.all.Rational(time), gfobj.exodus_rate)
+		gf_alt = sum(alt_eqs)
+		result = mutations.depth_first_mutypes(max_k, ordered_mutype_list, gf_alt, theta, rate_dict, exclude=(2,3))
 		return result.astype(np.float64)
+
+
+	@pytest.fixture(
+	scope='class', 
+	params=[
+		([(1,2,0)], sage.all.SR.var('E'), None, None, np.array([.1, .2, .3], dtype=np.float64)),
+		(None, None, [(2,1)], sage.all.SR.var('M'), np.array([.1, .2, .3, .4], dtype=np.float64)),
+		([(1,2,0)], sage.all.SR.var('E'), [(2,1)], sage.all.SR.var('M'), np.array([1.0, 0.5, 0.9, 0.001], dtype=np.float64))
+		],
+	ids=[
+		'DIV',
+		'MIG', 
+		'IM'
+		],
+	)
+	def get_IM_gfobject(self, request):
+		sample_list = [(),('a','a'),('b','b')]
+		ancestral_pop = 0
+		coalescence_rates = (sage.all.SR.var('c0'), sage.all.SR.var('c1'), sage.all.SR.var('c2'))
+		coalescence_rate_idxs = (0, 1, 2)
+		k_max = {'m_1':2, 'm_2':2, 'm_3':2, 'm_4':2}
+		mutype_labels, max_k = zip(*sorted(k_max.items()))
+		branchtype_dict_mat = gfmat.make_branchtype_dict_idxs(sample_list, mapping='unrooted', labels=mutype_labels)
+		exodus_direction, exodus_rate, migration_direction, migration_rate, variable_array = request.param
+		
+		variables_array = list(coalescence_rates)
+		migration_rate_idx, exodus_rate_idx = None, None
+		if migration_rate!=None:
+			migration_rate_idx = len(variables_array)
+			variables_array.append(migration_rate)
+		if exodus_rate!=None:
+			exodus_rate_idx = len(variables_array)
+			variables_array.append(exodus_rate)
+		variables_array += [sage.all.SR.var(m) for m in mutype_labels]
+		variables_array = np.array(variables_array, dtype=object)
+		
+		gfobj = gflib.GFMatrixObject(
+			sample_list,
+			coalescence_rate_idxs, 
+			branchtype_dict_mat,
+			exodus_rate=exodus_rate_idx,
+			exodus_direction=exodus_direction,
+			migration_rate=migration_rate_idx,
+			migration_direction=migration_direction
+			)
+
+		return gfobj, variable_array
 
 def equations_from_matrix_with_inverse(multiplier_array, paths, var_array, time, delta_idx):
 	split_paths = gfmat.split_paths_laplace(paths, multiplier_array, delta_idx)
@@ -346,9 +369,20 @@ def equations_from_matrix_with_inverse(multiplier_array, paths, var_array, time,
 	multiplier_array_no_delta = multiplier_array[:,:,subset_no_delta] 
 	for idx, (no_delta, with_delta) in enumerate(split_paths):
 		delta_in_nom_list = delta_in_nom_all[with_delta]
-		inverse = np.sum(gflib.inverse_laplace_single_event(multiplier_array_no_delta[with_delta], var_array, time, delta_in_nom_list))
+		inverse = gflib.inverse_laplace_single_event(multiplier_array_no_delta[with_delta], var_array, time, delta_in_nom_list)
+		if isinstance(inverse, np.ndarray):
+			inverse = np.sum(inverse)
 		no_inverse = np.prod(gfmat.equations_from_matrix(multiplier_array_no_delta[no_delta], var_array))
 		results[idx] = np.prod((inverse, no_inverse))
 	return results
+
+def equations_with_sage(multiplier_array, paths, var_array, time, delta_idx):
+	delta = var_array[delta_idx] if delta_idx is not None else None
+	eqs = np.zeros(len(paths), dtype=object)
+	for i, path in enumerate(paths):
+		ma = multiplier_array[np.array(path, dtype=int)]
+		temp = np.prod(gfmat.equations_from_matrix(ma, var_array))
+		eqs[i] = gflib.return_inverse_laplace(temp, delta).subs({sage.all.SR.var('T'):time})
+	return eqs
 
 

@@ -120,6 +120,7 @@ def depth_first_mutypes(max_k, labels, eq, theta, rate_dict, exclude=None, preci
 				#temp = eval_equation(new_eq, theta, rate_dict, mucounts, factorials, precision)
 				result[new_mutype] = temp
 				#result[mutype] = eval_equation(eq, theta, rate_dict, mucounts, precision)
+
 	return result
 
 def breadth_first_mutypes(max_k, labels, eq, theta, rate_dict, exclude=None, precision=165):
@@ -141,16 +142,27 @@ def breadth_first_mutypes(max_k, labels, eq, theta, rate_dict, exclude=None, pre
 def single_step_df_mutypes_diff(mutype, label, k, max_k, eq, theta, exclude):
 	subsdict = {label:theta}
 	# for i==0
-	yield (mutype, k-1, eq.subs(subsdict))
+	try:
+		yield (mutype, k-1, eq.subs(subsdict))
+	except ValueError as e:
+		print(mutype)
+		print('first eq sub')
+		print(e)
+		raise ValueError
 	if len(exclude)==0 or (k!=exclude[0] or mutype[exclude[1]]==0):
-		new_eq = eq
-		#for i 1 .. max_k
-		temp = list(mutype)
-		for i in range(1, max_k+1):
-			temp[k] = i
-			new_eq = sage.all.diff(new_eq, label)
-			yield (tuple(temp), k-1, new_eq.subs(subsdict))
-		
+		try:
+			new_eq = eq
+			#for i 1 .. max_k
+			temp = list(mutype)
+			for i in range(1, max_k+1):
+				temp[k] = i
+				new_eq = sage.all.diff(new_eq, label)
+				yield (tuple(temp), k-1, new_eq.subs(subsdict))
+		except:
+			print(mutype)
+			print(k, i)
+			print(e)
+			raise ValueError
 		#for i==max_k+1
 		subsdict[label] = 0
 		temp[k] = max_k+1

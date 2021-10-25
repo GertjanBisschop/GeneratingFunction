@@ -118,11 +118,13 @@ def inverse_laplace_PFE(poles, multiplicities, time, binom_coefficients, factori
 		if use_numba:
 			B = gfpfe.return_beta(poles)
 			expanded_numerators = gfpfe.derive_residues_numba(binom_coefficients, B, multiplicities, max_multiplicity)
+			#expanded numerators is of shape (num_poles, max_multiplicity)
+			inverse_laplace_terms = PFE_to_inverse(expanded_numerators, poles, time, (0, max_multiplicity), factorials[:max_multiplicity])
 		else:
 			B = gfpfe.return_beta(poles, dtype=object)
-			expanded_numerators = gfpfe.derive_residues(binom_coefficients, B, multiplicities, max_multiplicity, dtype=object)			
-		#expanded numerators is of shape (num_poles, max_multiplicity)
-		inverse_laplace_terms = PFE_to_inverse(expanded_numerators, poles, time, (0, max_multiplicity), factorials[:max_multiplicity])
+			expanded_numerators = gfpfe.derive_residues(binom_coefficients, B, multiplicities, max_multiplicity, object)			
+			#expanded numerators is of shape (num_poles, max_multiplicity)
+			inverse_laplace_terms = PFE_to_inverse_object(expanded_numerators, poles, time, (0, max_multiplicity), factorials[:max_multiplicity])
 		return np.sum(inverse_laplace_terms)
 	elif num_poles == 1:
 		multiplicity = multiplicities[0]
@@ -136,6 +138,21 @@ def PFE_to_inverse(expanded_numerators, poles, time, time_exponents, factorials)
 	#poles are defined as (delta - (-pole))
 	temp = factorials * time**np.arange(*time_exponents) * expanded_numerators
 	return np.exp(time*poles)[:, None] * temp
+
+def PFE_to_inverse_object(expanded_numerators, poles, time, time_exponents, factorials):
+	#quick patch!
+	#factorials = 1/np.cumprod(np.arange(1,max_multiplicity))
+	#factorials = np.hstack((1, factorials)) #can be precalculated
+	#poles are defined as (delta - (-pole))
+	temp = factorials * time**np.arange(*time_exponents) * expanded_numerators
+	num_poles, max_multiplicity = temp.shape
+	result = np.zeros(num_poles, dtype=object)
+	for i in range(num_poles):
+		s = 0
+		for j in range(max_multiplicity):
+			s+=np.exp(time*poles[i]) * temp[i,j]
+		result[i] = s
+	return result
 
 def inverse_laplace_single_event_all_temp(multiplier_array, var_array, time, delta_idx, paths):
 	#temp placeholder function
@@ -182,7 +199,7 @@ def inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom
 	constants_nom = constants[:,0]
 	leading_constants = np.prod(constants_nom, initial=1, where=constants_nom!=0, axis=-1)
 	if any(d==0 for d in denominators): #any of denominators entries 0:
-		#EXCEPTION -> this means there is a higher order pole, can be solved with pfe!
+		##EXCEPTION -> this means there is a higher order pole, can be solved with pfe!
 		poles, multiplicities = np.unique(constants_denom, return_counts=True)
 		if not any(delta_in_nom_list): #no delta in nominator
 			poles = np.hstack((poles, 0.0))
@@ -474,7 +491,7 @@ class GFMatrixObject(GFObject):
 		delta_idx = self.exodus_rate
 		if delta_idx is None:
 			collapsed_graph_array = graph_array
-			eq_array = tuple([tuple(i) for i in range(eq_matrix.shape[0])])
+			eq_array = tuple([(i,) for i in range(eq_matrix.shape[0])])
 			to_invert_array = np.zeros(len(eq_array), dtype=bool)			
 		else:
 			root = 0
