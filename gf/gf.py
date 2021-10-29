@@ -538,6 +538,77 @@ class GFMatrixObject(GFObject):
 			adjacency_matrix, eq_array, to_invert_array = eq_dict_to_adjacency_matrix_collapsed_graph(equations_dict, new_node_idx)
 		return (collapsed_graph_array, adjacency_matrix, eq_array, to_invert_array)
 				
+	def equations_graph(self):
+		delta_idx = self.exodus_rate
+		stack = [(list(), self.sample_list, 0),]
+		eq_list = list()
+		eq_idx = 0
+		node_idx, inverted_node_idx = 1, -1
+		#keeping track of things
+		eq_graph_dict = collections.defaultdict(set) #key = parent_eq_node, value = [children eq_nodes]
+		equation_dict = dict() #key=eq_node, value=[eq_idx1, eq_idx2,...]
+		state_eq_dict = dict() #key=(parent, child), value=eq_idx
+		state_node_dict = dict()
+		visited = list() #list of all states visisted
+	
+		while stack:
+			path_so_far, state, parent_idx = stack.pop()
+			parent = sample_to_str(state)
+			if sum(len(pop) for pop in state)==1:		
+				#add last equation to equation_chain
+				#make node of equation chain within eq_graph_dict
+				if len(path_so_far)>0:
+					#equation_dict[inverted_node_idx] = (tuple(path_so_far), True)
+					equation_dict[inverted_node_idx] = tuple(path_so_far)
+					eq_graph_dict[parent_idx].add(inverted_node_idx)
+					inverted_node_idx-=1
+			else:
+				parent_visited = parent in visited
+				multiplier_array, new_state_list = self.gf_single_step(state)
+				if not parent_visited:
+					visited.append(parent)
+					eq_list.append(multiplier_array)
+				for new_eq, new_state in zip(multiplier_array, new_state_list):
+					child = sample_to_str(new_state)
+					if delta_idx is not None and new_eq[1, delta_idx]>0:
+						#equation to be inverted
+						path = path_so_far[:]
+						new_eq_idx = eq_idx if not parent_visited else state_eq_dict[(parent, child)]	
+						path.append(new_eq_idx)
+						
+						if new_eq[0, delta_idx]>0:
+							#end of equation chain, make node
+							#equation_dict[inverted_node_idx] = (tuple(path), True)
+							equation_dict[inverted_node_idx] = tuple(path)
+							eq_graph_dict[parent_idx].add(inverted_node_idx)
+							stack.append(([], new_state, inverted_node_idx))
+							inverted_node_idx-=1
+						else:
+							#equation chain needs to be continued
+							stack.append((path, new_state, parent_idx))
+					else:
+						#single equation will become new node, no delta
+						assert len(path_so_far)==0
+						if parent_visited:
+							#check if already connected to graph
+							#have to link parent_child pair to node_idx
+							new_node_idx = state_node_dict[(parent, child)]
+							eq_graph_dict[parent_idx].add(new_node_idx)
+						else:
+							stack.append(([], new_state, node_idx))
+							#equation_dict[node_idx] = ((eq_idx,), False)
+							equation_dict[node_idx] = (eq_idx,)
+							eq_graph_dict[parent_idx].add(node_idx)
+							state_node_dict[(parent, child)] = node_idx
+							node_idx+=1
+						
+					if not parent_visited:
+						state_eq_dict[(parent, child)] = eq_idx
+						eq_idx+=1
+		
+		#eq_graph_array, eq_array, to_invert_array, eq_matrix		
+		return (*remap_eq_arrays(eq_graph_dict, equation_dict, node_idx, inverted_node_idx), np.concatenate(eq_list, axis=0))
+
 	def gf_single_step(self, state_list):
 		current_branches = list(flatten(state_list))
 		numLineages = len(current_branches)
@@ -617,6 +688,33 @@ def eq_dict_to_adjacency_matrix_collapsed_graph(equation_dict, max_idx):
 	for idx, ((p, c), _) in enumerate(sorted_eq_dict):
 		adjacency_matrix[p,c] = idx
 	return (adjacency_matrix, eq_array, to_invert)
+
+def remap_eq_arrays(eq_graph_dict, equation_dict, node_idx, inverted_node_idx):
+	#if no non_inverted_eq, node_idx==1
+	#if no inverted_eq, node_idx==-1
+	#remap eq_graph_dict
+	max_node_idx = node_idx - 1  
+	total_num_nodes = max_node_idx - inverted_node_idx - 1 
+	eq_graph_dict = {
+		map_to_pos_values(k, max_node_idx):[map_to_pos_values(
+			v, max_node_idx) for v in vs] for k, vs in eq_graph_dict.items()
+		}
+	#remap equation_dict
+	equation_dict = {
+		map_to_pos_values(k, max_node_idx): vs for k, vs in equation_dict.items()
+		}
+	to_invert_array = np.ones(total_num_nodes, dtype=bool)
+	to_invert_array[:max_node_idx] = 0
+	eq_graph_array = [tuple(eq_graph_dict[i]) if i in eq_graph_dict else tuple() for i in range(total_num_nodes+1)]
+	eq_array = [tuple(equation_dict[i]) if i in equation_dict else tuple() for i in range(1,total_num_nodes+1)]
+
+	return (eq_graph_array, eq_array, to_invert_array)
+
+def map_to_pos_values(v, max_node_idx):
+	if v<0:
+		return max_node_idx - v
+	else:
+		return v
 
 ################################## old functions #################################
 

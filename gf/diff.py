@@ -15,7 +15,6 @@ from collections import deque
 	])
 def simple_dot_product(A, B):
     m = A.size
-    p = B.size
     s = 0
     for i in range(m):
         s += A[i]*B[i]
@@ -104,6 +103,8 @@ def return_strictly_smaller_than_idx(idx, shape):
 		)
 
 def product_subsetdict(shape):
+	if len(shape)==0:
+		shape = (1,)
 	nd = numba.typed.Dict()
 	for idx in np.ndindex(tuple(shape)):
 		nd[idx] = return_smaller_than_idx(idx, shape)
@@ -141,7 +142,7 @@ def product_f_g(subsetdict, f, g, signs):
 	return result
 
 @numba.njit
-def all_polynomials(eq_matrix, shape, var_array, num_branchtypes):
+def all_polynomials(eq_matrix, shape, var_array, num_branchtypes, mutype_shape):
 	num_equations = eq_matrix.shape[0]
 	if num_equations==0:
 		result = np.zeros((1, *shape), dtype=np.float64)
@@ -150,22 +151,22 @@ def all_polynomials(eq_matrix, shape, var_array, num_branchtypes):
 	else:
 		result = np.zeros((num_equations, *shape), dtype=np.float64)
 		for idx, eq in enumerate(eq_matrix):
-			for mutype in np.ndindex(shape):
+			for idx2, mutype in zip(np.ndindex(shape), np.ndindex(mutype_shape)):
 				#mutype = np.array(mutype, dtype=np.uint8)
-				result[(idx, *mutype)] = taylor_coeff_inverse_polynomial(eq, var_array, mutype, num_branchtypes)
+				result[(idx, *idx2)] = taylor_coeff_inverse_polynomial(eq, var_array, mutype, num_branchtypes)
 		return result
 
 @numba.njit
-def all_exponentials(eq_matrix, shape, var_array, time, num_branchtypes):
+def all_exponentials(eq_matrix, shape, var_array, time, num_branchtypes, mutype_shape):
 	#eq_matrix contains only denominators!
 	num_equations = eq_matrix.shape[0]
 	result = np.zeros((num_equations, *shape), dtype=np.float64)
 	for idx, eq in enumerate(eq_matrix):
 		exponential_part = np.exp(-time*simple_dot_product(eq, var_array))
 		#exponential_part = np.exp(-time*eq.dot(var_array))
-		for mutype in np.ndindex(shape):
+		for idx2, mutype in zip(np.ndindex(shape), np.ndindex(mutype_shape)):
 			#mutype = np.array(mutype, dtype=np.uint8)
-			result[(idx, *mutype)] = taylor_coeff_exponential(-time, eq, exponential_part, mutype, num_branchtypes)
+			result[(idx, *idx2)] = taylor_coeff_exponential(-time, eq, exponential_part, mutype, num_branchtypes)
 	return result
 
 @numba.njit
@@ -200,13 +201,13 @@ def generate_pairwise_idxs(num_equations):
 		temp = np.tril(temp.T) + np.triu(temp, 1)
 		return temp[~np.eye(num_equations, dtype=bool)].reshape((num_equations, -1))
 
-def compile_inverted_eq(eq_matrix, shape, subsetdict, delta_in_nom):
+def compile_inverted_eq(eq_matrix, shape, subsetdict, delta_in_nom, mutype_shape):
 	#delta_column should already have been removed from eq_matrix
 	#note we need to add np.zeros(eq_matrix.shape[-1], dtype=int) 
 	#to eq_matrix if no delta in numerator
 	#polyf poles should be pairwise differences n*(n-1)/2 for n poles
 	#eq_matrix = eq_matrix.astype(np.float64) #required for numba dot product
-	num_branchtypes = len(shape)
+	num_branchtypes = len(mutype_shape)
 	numerators_eq = eq_matrix[:, 0]
 	denominators_eq = eq_matrix[:, 1]
 	num_equations = len(numerators_eq)
@@ -224,13 +225,13 @@ def compile_inverted_eq(eq_matrix, shape, subsetdict, delta_in_nom):
 		constants =  numerators_eq.dot(var)
 		leading_constant = np.prod(constants[constants>0])
 		#make derivative matrix for all pairwise differences eq_matrix 
-		polyf = all_polynomials(eq_matrix_diffs, shape, var, num_branchtypes)
+		polyf = all_polynomials(eq_matrix_diffs, shape, var, num_branchtypes, mutype_shape)
 		#combine derivative matrix results
 		denoms = product_pairwise_diff_inverse_polynomial(
 			polyf, (num_terms, *shape), pairwise_idxs, subsetdict
 			)
 		#n terms, both expf and denoms should be of length n
-		expf = all_exponentials(denominators_eq, shape, var, time, num_branchtypes)
+		expf = all_exponentials(denominators_eq, shape, var, time, num_branchtypes, mutype_shape)
 		#adapt with signs! diff dims!
 		terms = product_f_g(subsetdict, expf, denoms[:num_equations], signs)
 		all_terms = np.sum(terms, axis=0)
@@ -240,38 +241,53 @@ def compile_inverted_eq(eq_matrix, shape, subsetdict, delta_in_nom):
 	
 	return _make_eq
 
-def compile_non_inverted_eq(eq_matrix, shape):
-	num_branchtypes = len(shape)
+def compile_non_inverted_eq(eq_matrix, shape, mutype_shape):
+	num_branchtypes = len(mutype_shape)
 	#eq_matrix = eq_matrix.astype(np.float64) #required for numba dot product
 	def _make_eq(var):
 		if eq_matrix.shape[0]==0:
 			return np.zeros((0, *shape), dtype=np.float64)
 		constants = eq_matrix[:,0].dot(var)
-		result = all_polynomials(eq_matrix[:,1], shape, var, num_branchtypes)
+		result = all_polynomials(eq_matrix[:,1], shape, var, num_branchtypes, mutype_shape)
 		transpose = result.T 
 		transpose *= constants
 		return result
 	return _make_eq
 
-def prepare_graph_evaluation(eq_matrix, to_invert_array, eq_array, shape, delta_idx, subsetdict):
+def prepare_graph_evaluation(eq_matrix, to_invert_array, eq_array, shape, delta_idx, subsetdict, mutype_shape):
 	if delta_idx is None:
 		eq_matrix_no_delta = eq_matrix
 	else:		
 		eq_matrix_no_delta = np.delete(eq_matrix, delta_idx, axis=2)	
-	not_to_invert = np.zeros(np.sum(~to_invert_array) ,dtype=int)
-	for i, to_invert in enumerate(to_invert_array):
-		if not to_invert:
-			not_to_invert[i] = eq_array[i][0]
-		else:
-			break
-	f_non_inverted = compile_non_inverted_eq(eq_matrix_no_delta[not_to_invert], shape)
+	not_to_invert = np.zeros(np.sum(~to_invert_array), dtype=int)
+	i=0
+	while i<to_invert_array.size and not to_invert_array[i]:
+		not_to_invert[i] = eq_array[i][0]
+		i+=1
+	 
+	f_non_inverted = compile_non_inverted_eq(eq_matrix_no_delta[not_to_invert], shape, mutype_shape)
 	f_inverted = []
 	for idx in range(i, len(to_invert_array)):
 		eq_idxs = eq_array[idx]
 		eq_idxs = np.array(eq_idxs, dtype=int)
 		delta_in_nom = np.any(eq_matrix[eq_idxs][:, 0, delta_idx])==1
-		f_inverted.append(compile_inverted_eq(eq_matrix_no_delta[eq_idxs], shape, subsetdict, delta_in_nom))
+		f_inverted.append(compile_inverted_eq(eq_matrix_no_delta[eq_idxs], shape, subsetdict, delta_in_nom, mutype_shape))
 	return (f_non_inverted, f_inverted)
+
+def prepare_graph_evaluation_with_marginals(eq_matrix, to_invert_array, eq_array, marg_iterator, delta_idx):
+	#goal: generate (f_non_inverted, f_inverted) pairs for all needed shapes/eq_matrices
+	#eq_matrix needs to be prepared in a way that allows us to study marginals
+	#marg_boolean?
+	#prepare shape and subsetdict (linked to shape)
+	all_fs = []
+	num_branchtypes = len(marg_iterator[0][0])
+	for marg_bool, shape, _, subsetdict in zip(*marg_iterator):
+		#change eq_matrix appropriately
+		#setting branchtypes to 0 that need to be set to 0
+		eqm = eq_matrix.copy() 
+		eqm[..., -num_branchtypes:][marg_bool] = 0
+		all_fs.append(prepare_graph_evaluation(eqm, to_invert_array, eq_array, shape, delta_idx, subsetdict))
+	return all_fs
 
 def evaluate_single_point(shape, f_non_inverted, *f_inverted):
 	def _eval_single_point(var, time):
@@ -283,6 +299,55 @@ def evaluate_single_point(shape, f_non_inverted, *f_inverted):
 		return result
 	
 	return _eval_single_point
+
+def evaluate_single_point_with_marginals(k_max, f_array, num_eq_tuple, slices):
+	#f_array should be of shape: (k_max.size**2, 2)
+	result_shape = k_max+2
+	#shape of final result should be
+	#k_max.size**2, num_eq_non_inverted + num_eq_inverted, *k_max+2
+	num_eq_non_inverted, num_eq_inverted = num_eq_tuple
+	num_eq = num_eq_non_inverted + num_eq_inverted
+	def _eval_single_point(var, time):
+		result = np.zeros((num_eq, *result_shape), dtype=np.float64)
+		for marg_idx, ((f_non_inverted, f_inverted), slc) in enumerate(zip(f_array, slices)):
+			result[marg_idx, :num_eq_non_inverted][slc] = f_non_inverted(var)
+			for idx, f in enumerate(f_inverted):
+				result[marg_idx, num_eq_non_inverted + idx][slc] = f(var, time)
+		return result
+	return _eval_single_point
+
+def marginals_nuissance_objects(k_max):
+	#all transforms of the same thing
+	marg_boolean = generate_booleans(k_max)
+	#use marg_bool as diff[marg_bool]=0
+	shapes = list(generate_shapes(k_max, marg_boolean))
+	slices = list(generate_slices(k_max, marg_boolean))
+	subsetdicts = [gfdiff.product_subsetdict(shape) for shape in shapes]
+	mutype_shape = list(generate_mutype_shapes(k_max, marg_boolean, shapes))
+	return (marg_boolean, shapes, mutype_shapes, subsetdicts, slices)
+
+def generate_booleans(k_max):
+	num_repeats = len(k_max)
+	return np.array([a for a in itertools.product(range(2), repeat=num_repeats)], dtype=bool)
+
+def generate_shapes(k_max, marg_boolean):
+	for mb in ~marg_boolean:
+		result = tuple(k_max[mb])
+		if len(result)==0:
+			yield (1,)
+		else:
+			yield result
+
+def generate_mutype_shapes(k_max, marg_boolean, shapes):
+	for mb, shape in zip(~marg_boolean, shapes):
+		mutype_shape = np.ones(num_branchtypes, dtype=int)
+		mutype_shape[mb] = shape
+		yield tuple(shape)	
+
+def generate_slices(k_max, marg_boolean):
+	#generate slices according to provided boolean iter
+	for b in marg_boolean:
+		yield tuple([slice(0,k_max[i]+1) if not bi else slice(k_max[i], k_max[i]+1) for i, bi in enumerate(b)])
 
 def taylor_to_probability(shape, theta, include_marginals=False):
 	if not include_marginals:
@@ -331,12 +396,12 @@ def sort_util(n,visited,stack, graph):
 	stack.append(n)
 
 def resolve_dependencies(graph):
-	visited = np.zeros(len(graph)+1, dtype=np.uint8)
+	visited = np.zeros(len(graph)+1, dtype=int)
 	stack =[]
 	for idx, node in enumerate(graph):
 		if visited[idx] == 0:
 			sort_util(idx,visited,stack, graph)
-	return np.array(stack, dtype=np.uint64)
+	return np.array(stack, dtype=int)
 
 def iterate_graph(sequence, graph, adjacency_matrix, evaluated_eqs, subsetdict):
 	shape = evaluated_eqs[0].shape
@@ -354,3 +419,35 @@ def iterate_graph(sequence, graph, adjacency_matrix, evaluated_eqs, subsetdict):
 		node_values[parent] = temp
 			
 	return node_values
+
+def reverse_depth_first_graph_traversal(eq_graph):
+	stack = [0,]
+	sequence = [0]
+	while stack:
+		parent = stack.pop()
+		for child in eq_graph[parent]:
+			sequence.append(child)
+			stack.append(child)
+	return sequence[::-1]
+
+def iterate_eq_graph(sequence, graph, evaluated_eqs, subsetdict):
+	shape = evaluated_eqs[0].shape
+	num_nodes = len(sequence)
+	node_values = np.zeros((num_nodes, *shape), dtype=np.float64)
+	node_values[1:] = evaluated_eqs
+	for parent in sequence:
+		children = graph[parent]
+		temp = np.zeros(shape, dtype=np.float64)
+		for child in children:
+			temp+=node_values[child]
+			if parent!=0:
+				node_values[parent] = series_product(temp, evaluated_eqs[parent-1], subsetdict)
+			else:
+				node_values[parent] = temp
+	return node_values
+
+def iterate_eq_graph_with_marginals(sequence, graph, evaluated_eqs, subsetdicts, slices, shape):
+	result = np.zeros(shape, dtype=np.float64)
+	for subsetdict, slc in zip(subsetdicts, slices):
+		result[1,slc] = iterate_eq_graph(sequence, graph, evaluated_eqs, subsetdict)[0]
+	return result

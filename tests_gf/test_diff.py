@@ -44,7 +44,7 @@ class Test_taylor_series_coefficients:
 			[sage.all.Rational(0.1), sage.all.Rational(0.2), sage.all.SR.var('m1'), sage.all.SR.var('m2')], 
 			dtype=object
 			)
-		result = gfdiff.compile_non_inverted_eq(eq_matrix, shape)(var_array)
+		result = gfdiff.compile_non_inverted_eq(eq_matrix, shape, shape)(var_array)
 		subsetdict = gfdiff.product_subsetdict(shape)
 		combined_result = gfdiff.product_f(subsetdict, result)
 		#from symbolic eq
@@ -76,7 +76,7 @@ class Test_taylor_series_coefficients:
 			)
 		time = 1.0
 		subsetdict = gfdiff.product_subsetdict(shape)
-		result = gfdiff.compile_inverted_eq(eq_matrix_no_delta, shape, subsetdict, delta_in_nom)(var_array, time)
+		result = gfdiff.compile_inverted_eq(eq_matrix_no_delta, shape, subsetdict, delta_in_nom, shape)(var_array, time)
 		print(result)
 		#from symbolic eq
 		subs_dict = {b:var_array[-1] for b in symbolic_var_array[-2:]}
@@ -111,8 +111,8 @@ class Test_taylor_series_coefficients:
 			)
 		time = 1.0
 		subsetdict = gfdiff.product_subsetdict(shape)
-		result_inverted_part = gfdiff.compile_inverted_eq(eq_matrix_no_delta[delta_in_denom], shape, subsetdict, delta_in_nom)(var_array, time)
-		result_non_inverted_part = gfdiff.compile_non_inverted_eq(eq_matrix_no_delta[~delta_in_denom], shape)(var_array)
+		result_inverted_part = gfdiff.compile_inverted_eq(eq_matrix_no_delta[delta_in_denom], shape, subsetdict, delta_in_nom, shape)(var_array, time)
+		result_non_inverted_part = gfdiff.compile_non_inverted_eq(eq_matrix_no_delta[~delta_in_denom], shape, shape)(var_array)
 		result = gfdiff.product_f(subsetdict, np.vstack((result_inverted_part[None, :], result_non_inverted_part)))
 		print('result')
 		print(result)
@@ -216,7 +216,7 @@ class Test_taylor2:
 		ordered_mutype_list = [sage.all.SR.var(f'm_{idx}') for idx in range(1,size)]
 		num_mutypes = len(ordered_mutype_list)
 		alt_variable_array = np.hstack((variable_array[:2], np.array(ordered_mutype_list)))
-		result = self.evaluate_graph(gfobj, shape, theta, variable_array, time)
+		result = self.evaluate_graph2(gfobj, shape, theta, variable_array, time)
 		print(result)
 		exp_result = self.evaluate_symbolic_equation(gfobj, ordered_mutype_list, max_k, theta, alt_variable_array, time)
 		subidx = tuple([slice(0,s) for s in shape])
@@ -245,7 +245,7 @@ class Test_taylor2:
 			var_symbolic = np.hstack((variable_array, ordered_mutype_list))
 		time = 1.5
 		
-		result = self.evaluate_graph(gfobj, shape, theta, var, time)
+		result = self.evaluate_graph2(gfobj, shape, theta, var, time)
 		expected_result = self.evaluate_symbolic_equation(gfobj, ordered_mutype_list, max_k, theta, var_symbolic, time, sage_inverse=True)
 		print(result)
 		subidx = tuple([slice(0,s) for s in shape])
@@ -269,23 +269,6 @@ class Test_taylor2:
 			)
 		return gfobj
 
-	def get_gf_no_mutations_3(self):
-		sample_list = [(), ('a', 'a', 'a')]
-		coalescence_rate_idxs = (0, 1)
-		exodus_rate_idx = 2 
-		exodus_direction = [(1,0),]
-		k_max = {'m_1':2, 'm_2':2}
-		mutype_labels, max_k = zip(*sorted(k_max.items()))
-		branchtype_dict_mat = {'a':0, 'aa':1}
-		gfobj = gflib.GFMatrixObject(
-			sample_list, 
-			coalescence_rate_idxs, 
-			branchtype_dict_mat,
-			exodus_direction=exodus_direction,
-			exodus_rate=exodus_rate_idx
-			)
-		return gfobj
-
 	def evaluate_graph(self, gfobj, shape, theta, var, time):
 		delta_idx = gfobj.exodus_rate
 		graph_array, adjacency_matrix, eq_matrix = gfobj.make_graph()
@@ -293,10 +276,24 @@ class Test_taylor2:
 		dependency_sequence = gfdiff.resolve_dependencies(collapsed_graph_array)
 		#print(dependency_sequence)
 		subsetdict = gfdiff.product_subsetdict(shape)
-		f_non_inverted, f_inverted = gfdiff.prepare_graph_evaluation(eq_matrix, to_invert, eq_array, shape, delta_idx, subsetdict)
+		f_non_inverted, f_inverted = gfdiff.prepare_graph_evaluation(eq_matrix, to_invert, eq_array, shape, delta_idx, subsetdict, shape)
 		evaluator = gfdiff.evaluate_single_point(shape, f_non_inverted, *f_inverted)
 		results = evaluator(var, time)
 		final_result = gfdiff.iterate_graph(dependency_sequence, collapsed_graph_array, adjacency_matrix, results, subsetdict)
+		final_result = final_result[0]
+		multiplier_matrix = gfdiff.taylor_to_probability(shape, theta, include_marginals=False)
+		assert final_result.shape==multiplier_matrix.shape
+		return multiplier_matrix * final_result
+
+	def evaluate_graph2(self, gfobj, shape, theta, var, time):
+		delta_idx = gfobj.exodus_rate
+		eq_graph_array, eq_array, to_invert, eq_matrix = gfobj.equations_graph()		
+		dependency_sequence = gfdiff.resolve_dependencies(eq_graph_array)
+		subsetdict = gfdiff.product_subsetdict(shape)
+		f_non_inverted, f_inverted = gfdiff.prepare_graph_evaluation(eq_matrix, to_invert, eq_array, shape, delta_idx, subsetdict, shape)
+		evaluator = gfdiff.evaluate_single_point(shape, f_non_inverted, *f_inverted)
+		results = evaluator(var, time)
+		final_result = gfdiff.iterate_eq_graph(dependency_sequence, eq_graph_array, results, subsetdict)
 		final_result = final_result[0]
 		multiplier_matrix = gfdiff.taylor_to_probability(shape, theta, include_marginals=False)
 		assert final_result.shape==multiplier_matrix.shape
@@ -313,7 +310,6 @@ class Test_taylor2:
 		gf_alt = sum(alt_eqs)
 		result = mutations.depth_first_mutypes(max_k, ordered_mutype_list, gf_alt, theta, rate_dict, exclude=(2,3))
 		return result.astype(np.float64)
-
 
 	@pytest.fixture(
 	scope='class', 
