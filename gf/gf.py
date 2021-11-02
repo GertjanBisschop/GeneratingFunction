@@ -91,15 +91,15 @@ def inverse_laplace(equation, dummy_variable):
 	return (sage.all.inverse_laplace(subequation / dummy_variable, dummy_variable, sage.all.SR.var('T', domain='real'), algorithm='giac') for subequation in equation)
 
 def return_inverse_laplace(equation, dummy_variable):
-    if dummy_variable!=None:
-    	return sage.all.inverse_laplace(
-    	    equation / dummy_variable, 
-    	    dummy_variable,
-    	    sage.all.SR.var('T', domain='real'), 
-    	    algorithm='giac'
-    	    )
-    else:
-    	return equation
+	if dummy_variable!=None:
+		return sage.all.inverse_laplace(
+			equation / dummy_variable, 
+			dummy_variable,
+			sage.all.SR.var('T', domain='real'), 
+			algorithm='giac'
+			)
+	else:
+		return equation
 
 def inverse_laplace_PFE(poles, multiplicities, time, binom_coefficients, factorials, use_numba=True):
 	"""
@@ -118,11 +118,13 @@ def inverse_laplace_PFE(poles, multiplicities, time, binom_coefficients, factori
 		if use_numba:
 			B = gfpfe.return_beta(poles)
 			expanded_numerators = gfpfe.derive_residues_numba(binom_coefficients, B, multiplicities, max_multiplicity)
+			#expanded numerators is of shape (num_poles, max_multiplicity)
+			inverse_laplace_terms = PFE_to_inverse(expanded_numerators, poles, time, (0, max_multiplicity), factorials[:max_multiplicity])
 		else:
 			B = gfpfe.return_beta(poles, dtype=object)
-			expanded_numerators = gfpfe.derive_residues(binom_coefficients, B, multiplicities, max_multiplicity, dtype=object)			
-		#expanded numerators is of shape (num_poles, max_multiplicity)
-		inverse_laplace_terms = PFE_to_inverse(expanded_numerators, poles, time, (0, max_multiplicity), factorials[:max_multiplicity])
+			expanded_numerators = gfpfe.derive_residues(binom_coefficients, B, multiplicities, max_multiplicity, object)			
+			#expanded numerators is of shape (num_poles, max_multiplicity)
+			inverse_laplace_terms = PFE_to_inverse_object(expanded_numerators, poles, time, (0, max_multiplicity), factorials[:max_multiplicity])
 		return np.sum(inverse_laplace_terms)
 	elif num_poles == 1:
 		multiplicity = multiplicities[0]
@@ -136,6 +138,21 @@ def PFE_to_inverse(expanded_numerators, poles, time, time_exponents, factorials)
 	#poles are defined as (delta - (-pole))
 	temp = factorials * time**np.arange(*time_exponents) * expanded_numerators
 	return np.exp(time*poles)[:, None] * temp
+
+def PFE_to_inverse_object(expanded_numerators, poles, time, time_exponents, factorials):
+	#quick patch!
+	#factorials = 1/np.cumprod(np.arange(1,max_multiplicity))
+	#factorials = np.hstack((1, factorials)) #can be precalculated
+	#poles are defined as (delta - (-pole))
+	temp = factorials * time**np.arange(*time_exponents) * expanded_numerators
+	num_poles, max_multiplicity = temp.shape
+	result = np.zeros(num_poles, dtype=object)
+	for i in range(num_poles):
+		s = 0
+		for j in range(max_multiplicity):
+			s+=np.exp(time*poles[i]) * temp[i,j]
+		result[i] = s
+	return result
 
 def inverse_laplace_single_event_all_temp(multiplier_array, var_array, time, delta_idx, paths):
 	#temp placeholder function
@@ -182,7 +199,7 @@ def inverse_laplace_single_event(multiplier_array, var_array, time, delta_in_nom
 	constants_nom = constants[:,0]
 	leading_constants = np.prod(constants_nom, initial=1, where=constants_nom!=0, axis=-1)
 	if any(d==0 for d in denominators): #any of denominators entries 0:
-		#EXCEPTION -> this means there is a higher order pole, can be solved with pfe!
+		##EXCEPTION -> this means there is a higher order pole, can be solved with pfe!
 		poles, multiplicities = np.unique(constants_denom, return_counts=True)
 		if not any(delta_in_nom_list): #no delta in nominator
 			poles = np.hstack((poles, 0.0))
@@ -434,6 +451,164 @@ class GFMatrixObject(GFObject):
 						eq_idx+=1
 		return (paths, np.concatenate(eq_list, axis=0))
 
+	def make_graph(self):
+		stack = [(0, self.sample_list),]
+		eq_list = list()
+		eq_idx = 0
+		node_idx = 1
+		graph_dict = collections.defaultdict(list)
+		equation_dict = dict() #key=(parent, child), value=eq_idx
+		nodes_visited = set() #set of all nodes visisted
+		str_to_numeric_node_dict = {sample_to_str(self.sample_list): 0}
+		
+		while stack:
+			parent_node_numeric, state = stack.pop()
+			parent_node = sample_to_str(state)
+			if sum(len(pop) for pop in state)>1:		
+				if parent_node not in nodes_visited:
+					nodes_visited.add(parent_node)
+					multiplier_array, new_state_list = self.gf_single_step(state)
+					eq_list.append(multiplier_array)
+					for eq, new_state in zip(multiplier_array, new_state_list):			
+						child_node = sample_to_str(new_state)
+						if child_node in str_to_numeric_node_dict:
+							child_node_numeric = str_to_numeric_node_dict[child_node]
+						else:
+							child_node_numeric = node_idx
+							str_to_numeric_node_dict[child_node] = child_node_numeric 
+							node_idx+=1
+						graph_dict[parent_node_numeric].append(child_node_numeric)
+						equation_dict[(parent_node_numeric, child_node_numeric)] = eq_idx
+						stack.append((child_node_numeric, new_state))
+						eq_idx+=1
+
+		graph_array = [tuple(graph_dict[i]) if i in graph_dict else tuple() for i in range(node_idx)]
+		adjacency_matrix = eq_dict_to_adjacency_matrix(equation_dict, node_idx, eq_idx)
+
+		return (graph_array, adjacency_matrix, np.concatenate(eq_list, axis=0))
+
+	def collapse_graph(self, graph_array, adjacency_matrix, eq_matrix):
+		delta_idx = self.exodus_rate
+		if delta_idx is None:
+			collapsed_graph_array = graph_array
+			eq_array = tuple([(i,) for i in range(eq_matrix.shape[0])])
+			to_invert_array = np.zeros(len(eq_array), dtype=bool)			
+		else:
+			root = 0
+			visited = {root:0} #old_index, new_index
+			stack = [(root, root, list())]
+			new_node_idx = 1
+			collapsed_graph_dict = collections.defaultdict(list)
+			equations_dict = dict()
+	
+			while stack:
+				current_node, parent_new_idx, path_so_far = stack.pop()
+				children = graph_array[current_node]
+				if len(children)==0 and len(path_so_far)>0:
+					child_new_idx = new_node_idx
+					new_node_idx+=1
+					collapsed_graph_dict[parent_new_idx].append(child_new_idx)
+					equations_dict[parent_new_idx, child_new_idx] = (tuple(path_so_far), True)
+				else:
+					for child in children:
+						vertex_eq = adjacency_matrix[current_node, child]
+						path = path_so_far[:]
+						path.append(vertex_eq)
+						to_invert = eq_matrix[vertex_eq,1, delta_idx]==1
+						if eq_matrix[vertex_eq, 0, delta_idx]==0 and to_invert:
+							stack.append((child, parent_new_idx, path))
+						elif eq_matrix[vertex_eq, 0, delta_idx]==1:
+							child_new_idx = new_node_idx
+							new_node_idx+=1
+							collapsed_graph_dict[parent_new_idx].append(child_new_idx)
+							stack.append((child, child_new_idx, []))
+							equations_dict[parent_new_idx, child_new_idx] = (tuple(path), to_invert) 
+						else:
+							if child in visited:
+								child_new_idx = visited[child]
+							else:
+								child_new_idx = new_node_idx
+								visited[child] = child_new_idx
+								new_node_idx+=1
+								stack.append((child, child_new_idx, []))
+							collapsed_graph_dict[parent_new_idx].append(child_new_idx)
+							equations_dict[parent_new_idx, child_new_idx] = (tuple(path), to_invert)
+
+			collapsed_graph_array = [tuple(collapsed_graph_dict[i]) if i in collapsed_graph_dict else tuple() for i in range(new_node_idx)]
+			adjacency_matrix, eq_array, to_invert_array = eq_dict_to_adjacency_matrix_collapsed_graph(equations_dict, new_node_idx)
+		return (collapsed_graph_array, adjacency_matrix, eq_array, to_invert_array)
+				
+	def equations_graph(self):
+		delta_idx = self.exodus_rate
+		stack = [(list(), self.sample_list, 0),]
+		eq_list = list()
+		eq_idx = 0
+		node_idx, inverted_node_idx = 1, -1
+		#keeping track of things
+		eq_graph_dict = collections.defaultdict(set) #key = parent_eq_node, value = [children eq_nodes]
+		equation_dict = dict() #key=eq_node, value=[eq_idx1, eq_idx2,...]
+		state_eq_dict = dict() #key=(parent, child), value=eq_idx
+		state_node_dict = dict()
+		visited = list() #list of all states visisted
+	
+		while stack:
+			path_so_far, state, parent_idx = stack.pop()
+			parent = sample_to_str(state)
+			if sum(len(pop) for pop in state)==1:		
+				#add last equation to equation_chain
+				#make node of equation chain within eq_graph_dict
+				if len(path_so_far)>0:
+					#equation_dict[inverted_node_idx] = (tuple(path_so_far), True)
+					equation_dict[inverted_node_idx] = tuple(path_so_far)
+					eq_graph_dict[parent_idx].add(inverted_node_idx)
+					inverted_node_idx-=1
+			else:
+				parent_visited = parent in visited
+				multiplier_array, new_state_list = self.gf_single_step(state)
+				if not parent_visited:
+					visited.append(parent)
+					eq_list.append(multiplier_array)
+				for new_eq, new_state in zip(multiplier_array, new_state_list):
+					child = sample_to_str(new_state)
+					if delta_idx is not None and new_eq[1, delta_idx]>0:
+						#equation to be inverted
+						path = path_so_far[:]
+						new_eq_idx = eq_idx if not parent_visited else state_eq_dict[(parent, child)]	
+						path.append(new_eq_idx)
+						
+						if new_eq[0, delta_idx]>0:
+							#end of equation chain, make node
+							#equation_dict[inverted_node_idx] = (tuple(path), True)
+							equation_dict[inverted_node_idx] = tuple(path)
+							eq_graph_dict[parent_idx].add(inverted_node_idx)
+							stack.append(([], new_state, inverted_node_idx))
+							inverted_node_idx-=1
+						else:
+							#equation chain needs to be continued
+							stack.append((path, new_state, parent_idx))
+					else:
+						#single equation will become new node, no delta
+						assert len(path_so_far)==0
+						if parent_visited:
+							#check if already connected to graph
+							#have to link parent_child pair to node_idx
+							new_node_idx = state_node_dict[(parent, child)]
+							eq_graph_dict[parent_idx].add(new_node_idx)
+						else:
+							stack.append(([], new_state, node_idx))
+							#equation_dict[node_idx] = ((eq_idx,), False)
+							equation_dict[node_idx] = (eq_idx,)
+							eq_graph_dict[parent_idx].add(node_idx)
+							state_node_dict[(parent, child)] = node_idx
+							node_idx+=1
+						
+					if not parent_visited:
+						state_eq_dict[(parent, child)] = eq_idx
+						eq_idx+=1
+		
+		#eq_graph_array, eq_array, to_invert_array, eq_matrix		
+		return (*remap_eq_arrays(eq_graph_dict, equation_dict, node_idx, inverted_node_idx), np.concatenate(eq_list, axis=0))
+
 	def gf_single_step(self, state_list):
 		current_branches = list(flatten(state_list))
 		numLineages = len(current_branches)
@@ -493,6 +668,53 @@ class GFMatrixObject(GFObject):
 						temp[idx] = ()
 					result.append((self.exodus_rate, 1, tuple(temp)))
 		return result
+
+def eq_dict_to_adjacency_matrix(equation_dict, max_idx, max_value):
+	dtype = np.min_scalar_type(max_value+1)
+	fill_value = np.iinfo(dtype).max
+	adjacency_matrix = np.full((max_idx, max_idx), fill_value=fill_value, dtype=dtype)
+	for (p, c), eq_idx in equation_dict.items():
+		adjacency_matrix[p,c] = eq_idx
+	return adjacency_matrix
+
+def eq_dict_to_adjacency_matrix_collapsed_graph(equation_dict, max_idx):
+	sorted_eq_dict = sorted(equation_dict.items(), key= lambda x: x[1][1])
+	eq_array = tuple(t[1][0] for t in sorted_eq_dict)
+	max_value = max(flatten(eq_array))
+	to_invert = np.array([t[1][1] for t in sorted_eq_dict])
+	dtype = np.min_scalar_type(max_value+1)
+	fill_value = np.iinfo(dtype).max
+	adjacency_matrix = np.full((max_idx, max_idx), fill_value=fill_value, dtype=dtype)
+	for idx, ((p, c), _) in enumerate(sorted_eq_dict):
+		adjacency_matrix[p,c] = idx
+	return (adjacency_matrix, eq_array, to_invert)
+
+def remap_eq_arrays(eq_graph_dict, equation_dict, node_idx, inverted_node_idx):
+	#if no non_inverted_eq, node_idx==1
+	#if no inverted_eq, node_idx==-1
+	#remap eq_graph_dict
+	max_node_idx = node_idx - 1  
+	total_num_nodes = max_node_idx - inverted_node_idx - 1 
+	eq_graph_dict = {
+		map_to_pos_values(k, max_node_idx):[map_to_pos_values(
+			v, max_node_idx) for v in vs] for k, vs in eq_graph_dict.items()
+		}
+	#remap equation_dict
+	equation_dict = {
+		map_to_pos_values(k, max_node_idx): vs for k, vs in equation_dict.items()
+		}
+	to_invert_array = np.ones(total_num_nodes, dtype=bool)
+	to_invert_array[:max_node_idx] = 0
+	eq_graph_array = [tuple(eq_graph_dict[i]) if i in eq_graph_dict else tuple() for i in range(total_num_nodes+1)]
+	eq_array = [tuple(equation_dict[i]) if i in equation_dict else tuple() for i in range(1,total_num_nodes+1)]
+
+	return (eq_graph_array, eq_array, to_invert_array)
+
+def map_to_pos_values(v, max_node_idx):
+	if v<0:
+		return max_node_idx - v
+	else:
+		return v
 
 ################################## old functions #################################
 

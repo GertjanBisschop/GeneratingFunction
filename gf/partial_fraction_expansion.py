@@ -45,14 +45,15 @@ def derive_residues(A, B, multiplicities, max_multiplicity, dtype=np.float64):
 		B,
 		multiplicities[0], 
 		multiplicities[1],
-		max_multiplicity
+		max_multiplicity,
+		dtype
 	)
 	for n in range(3, num_poles+1):
 		result = derive_residues_next(A,B, multiplicities, result, n, dtype)
 
 	return result
 
-def derive_residues_next(A, B, multiplicities, intermediate_result, num_poles):
+def derive_residues_next(A, B, multiplicities, intermediate_result, num_poles, dtype):
 	result = np.zeros_like(intermediate_result)
 	for i, multiplicity in enumerate(multiplicities[:num_poles-1]):
 		for L in range(multiplicity):

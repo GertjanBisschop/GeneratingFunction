@@ -78,6 +78,7 @@ def generate_equation(equation, parent, node, max_k, ordered_mutype_list, margin
 def eval_equation(derivative, theta, ratedict, numeric_mucounts, precision):
 	mucount_total = np.sum(numeric_mucounts)
 	mucount_fact_prod = np.prod([np.math.factorial(count) for count in numeric_mucounts])
+	#mucount_fact_prod = np.prod(factorials[numeric_mucounts])
 	return sage.all.RealField(precision)((-1*theta)**(mucount_total)/mucount_fact_prod*derivative.subs(ratedict))
 
 def differs_one_digit(query, complete_list):
@@ -98,6 +99,63 @@ def tuple_distance(a_tuple, b_tuple):
 
 def sum_tuple_diff(tuple_a, tuple_b):
 	return sum(b-a for a,b in zip(tuple_a, tuple_b))
+
+def depth_first_mutypes(max_k, labels, eq, theta, rate_dict, exclude=None, precision=165):
+	#factorials = np.cumprod(np.arange(1, np.max(max_k)+1))
+	#factorials = np.hstack((1,factorials))
+	k = len(max_k) - 1
+	stack = [(tuple([0 for _ in range(len(max_k))]), k, eq),]
+	result = np.zeros(max_k+2, dtype=np.float64)
+	if exclude is None:
+		exclude = tuple()
+	while stack:
+		mutype, k, eq = stack.pop()
+		if k>0:
+			for step in single_step_df_mutypes_diff(mutype, labels[k], k, max_k[k], eq, theta, exclude):
+				stack.append(step)
+		else:
+			for new_mutype, _, new_eq in single_step_df_mutypes_diff(mutype, labels[k], k, max_k[k], eq, theta, exclude):
+				mucounts = np.array([m for m, max_k_m in zip(new_mutype, max_k) if m<=max_k_m])
+				temp = eval_equation(new_eq, theta, rate_dict, mucounts, precision)
+				#temp = eval_equation(new_eq, theta, rate_dict, mucounts, factorials, precision)
+				result[new_mutype] = temp
+				#result[mutype] = eval_equation(eq, theta, rate_dict, mucounts, precision)
+
+	return result
+
+def breadth_first_mutypes(max_k, labels, eq, theta, rate_dict, exclude=None, precision=165):
+	k = len(max_k) - 1
+	q = collections.deque()
+	q.append((tuple([0 for _ in range(len(max_k))]), k, eq))
+	result = np.zeros(max_k+2, dtype=np.float64)
+	while q:
+		mutype, k, eq = q.popleft()
+		if k>0:
+			for step in single_step_df_mutypes_diff(mutype, labels[k], k, max_k[k], eq, theta, exclude):
+				q.append(step)
+		else:
+			for new_mutype, _, eq in single_step_df_mutypes_diff(mutype, labels[k], k, max_k[k], eq, theta, exclude):
+				mucounts = [m for m, max_k_m in zip(new_mutype, max_k) if m<=max_k_m]
+				result[new_mutype] = eval_equation(eq, theta, rate_dict, mucounts, precision)
+	return result
+
+def single_step_df_mutypes_diff(mutype, label, k, max_k, eq, theta, exclude):
+	subsdict = {label:theta}
+	# for i==0
+	yield (mutype, k-1, eq.subs(subsdict))
+	if len(exclude)==0 or (k!=exclude[0] or mutype[exclude[1]]==0):
+		new_eq = eq
+		#for i 1 .. max_k
+		temp = list(mutype)
+		for i in range(1, max_k+1):
+			temp[k] = i
+			new_eq = sage.all.diff(new_eq, label)
+			yield (tuple(temp), k-1, new_eq.subs(subsdict))
+		#for i==max_k+1
+		subsdict[label] = 0
+		temp[k] = max_k+1
+		new_eq = eq.subs(subsdict)
+		yield (tuple(temp), k-1, new_eq)
 
 ############################## mutations as events: expanding gf #################################
 
@@ -298,25 +356,25 @@ def split_off_constant_term(numerators):
 				numba.float64(numba.float64, numba.float64)])
 def prod_with_zeros(x,y):
 	#only return 0 if both x and y are zero
-    temp = x*y
-    if temp==0:
-        if x==0:
-            if y==0:
-                return 0
-            else:
-                return y
-        else:
-            return x
-    else:
-        return temp
+	temp = x*y
+	if temp==0:
+		if x==0:
+			if y==0:
+				return 0
+			else:
+				return y
+		else:
+			return x
+	else:
+		return temp
 
 @numba.njit()
 def trim_zeros_numba(arr):
 	#for 2-d arrays
-    temp = np.ones(arr.shape[0], dtype=bool)
-    for idx in range(1, arr.shape[0]):
-        temp[idx] = ~np.all(arr[idx]==0)
-    return arr[temp]
+	temp = np.ones(arr.shape[0], dtype=bool)
+	for idx in range(1, arr.shape[0]):
+		temp[idx] = ~np.all(arr[idx]==0)
+	return arr[temp]
 
 def return_split_condition(paths_by_mutype):
 	return (np.unique(paths_by_mutype[..., 0]), np.unique(paths_by_mutype[..., 1]))

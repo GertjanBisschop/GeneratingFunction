@@ -37,10 +37,14 @@ def equations_from_matrix(multiplier_array, variables_array):
 	return temp[:,0]/temp[:,1]
 
 def split_paths_laplace(paths, multiplier_array, delta_idx):
-	filtered_paths = []
-	for path in paths:
-		condition = multiplier_array[path, 1, delta_idx]==1
-		filtered_paths.append(split(path, condition))
+	#split paths into no_delta, with_delta
+	if delta_idx is None:
+		filtered_paths = [[np.array(path, dtype=int),np.array([], dtype=int)] for path in paths]
+	else:
+		filtered_paths = []
+		for path in paths:
+			condition = multiplier_array[path, 1, delta_idx]==1
+			filtered_paths.append(split(path, condition))
 	return filtered_paths
 
 def split(arr_in, condition):
