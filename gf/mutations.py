@@ -142,27 +142,15 @@ def breadth_first_mutypes(max_k, labels, eq, theta, rate_dict, exclude=None, pre
 def single_step_df_mutypes_diff(mutype, label, k, max_k, eq, theta, exclude):
 	subsdict = {label:theta}
 	# for i==0
-	try:
-		yield (mutype, k-1, eq.subs(subsdict))
-	except ValueError as e:
-		print(mutype)
-		print('first eq sub')
-		print(e)
-		raise ValueError
+	yield (mutype, k-1, eq.subs(subsdict))
 	if len(exclude)==0 or (k!=exclude[0] or mutype[exclude[1]]==0):
-		try:
-			new_eq = eq
-			#for i 1 .. max_k
-			temp = list(mutype)
-			for i in range(1, max_k+1):
-				temp[k] = i
-				new_eq = sage.all.diff(new_eq, label)
-				yield (tuple(temp), k-1, new_eq.subs(subsdict))
-		except:
-			print(mutype)
-			print(k, i)
-			print(e)
-			raise ValueError
+		new_eq = eq
+		#for i 1 .. max_k
+		temp = list(mutype)
+		for i in range(1, max_k+1):
+			temp[k] = i
+			new_eq = sage.all.diff(new_eq, label)
+			yield (tuple(temp), k-1, new_eq.subs(subsdict))
 		#for i==max_k+1
 		subsdict[label] = 0
 		temp[k] = max_k+1

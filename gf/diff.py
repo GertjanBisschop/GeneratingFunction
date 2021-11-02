@@ -281,12 +281,12 @@ def prepare_graph_evaluation_with_marginals(eq_matrix, to_invert_array, eq_array
 	#prepare shape and subsetdict (linked to shape)
 	all_fs = []
 	num_branchtypes = len(marg_iterator[0][0])
-	for marg_bool, shape, _, subsetdict in zip(*marg_iterator):
+	for marg_bool, shape, mutype_shape, subsetdict, _ in zip(*marg_iterator):
 		#change eq_matrix appropriately
 		#setting branchtypes to 0 that need to be set to 0
 		eqm = eq_matrix.copy() 
-		eqm[..., -num_branchtypes:][marg_bool] = 0
-		all_fs.append(prepare_graph_evaluation(eqm, to_invert_array, eq_array, shape, delta_idx, subsetdict))
+		eqm[..., -num_branchtypes:][..., marg_bool] = 0
+		all_fs.append(prepare_graph_evaluation(eqm, to_invert_array, eq_array, shape, delta_idx, subsetdict, mutype_shape))
 	return all_fs
 
 def evaluate_single_point(shape, f_non_inverted, *f_inverted):
@@ -303,16 +303,14 @@ def evaluate_single_point(shape, f_non_inverted, *f_inverted):
 def evaluate_single_point_with_marginals(k_max, f_array, num_eq_tuple, slices):
 	#f_array should be of shape: (k_max.size**2, 2)
 	result_shape = k_max+2
-	#shape of final result should be
-	#k_max.size**2, num_eq_non_inverted + num_eq_inverted, *k_max+2
 	num_eq_non_inverted, num_eq_inverted = num_eq_tuple
 	num_eq = num_eq_non_inverted + num_eq_inverted
 	def _eval_single_point(var, time):
 		result = np.zeros((num_eq, *result_shape), dtype=np.float64)
-		for marg_idx, ((f_non_inverted, f_inverted), slc) in enumerate(zip(f_array, slices)):
-			result[marg_idx, :num_eq_non_inverted][slc] = f_non_inverted(var)
+		for ((f_non_inverted, f_inverted), slc) in zip(f_array, slices):
+			result[:num_eq_non_inverted][(..., *slc)].flat = f_non_inverted(var).flat
 			for idx, f in enumerate(f_inverted):
-				result[marg_idx, num_eq_non_inverted + idx][slc] = f(var, time)
+				result[num_eq_non_inverted + idx][(..., *slc)].flat = f(var, time).flat
 		return result
 	return _eval_single_point
 
@@ -322,8 +320,8 @@ def marginals_nuissance_objects(k_max):
 	#use marg_bool as diff[marg_bool]=0
 	shapes = list(generate_shapes(k_max, marg_boolean))
 	slices = list(generate_slices(k_max, marg_boolean))
-	subsetdicts = [gfdiff.product_subsetdict(shape) for shape in shapes]
-	mutype_shape = list(generate_mutype_shapes(k_max, marg_boolean, shapes))
+	subsetdicts = [product_subsetdict(shape) for shape in shapes]
+	mutype_shapes = list(generate_mutype_shapes(k_max, marg_boolean, shapes))
 	return (marg_boolean, shapes, mutype_shapes, subsetdicts, slices)
 
 def generate_booleans(k_max):
@@ -332,22 +330,23 @@ def generate_booleans(k_max):
 
 def generate_shapes(k_max, marg_boolean):
 	for mb in ~marg_boolean:
-		result = tuple(k_max[mb])
+		result = tuple(k_max[mb]+1)
 		if len(result)==0:
 			yield (1,)
 		else:
 			yield result
 
 def generate_mutype_shapes(k_max, marg_boolean, shapes):
+	num_branchtypes = len(k_max)
 	for mb, shape in zip(~marg_boolean, shapes):
 		mutype_shape = np.ones(num_branchtypes, dtype=int)
 		mutype_shape[mb] = shape
-		yield tuple(shape)	
+		yield tuple(mutype_shape)	
 
 def generate_slices(k_max, marg_boolean):
 	#generate slices according to provided boolean iter
 	for b in marg_boolean:
-		yield tuple([slice(0,k_max[i]+1) if not bi else slice(k_max[i], k_max[i]+1) for i, bi in enumerate(b)])
+		yield tuple([slice(0,k_max[i]+1) if not bi else slice(k_max[i]+1, k_max[i]+2) for i, bi in enumerate(b)])
 
 def taylor_to_probability(shape, theta, include_marginals=False):
 	if not include_marginals:
@@ -420,16 +419,6 @@ def iterate_graph(sequence, graph, adjacency_matrix, evaluated_eqs, subsetdict):
 			
 	return node_values
 
-def reverse_depth_first_graph_traversal(eq_graph):
-	stack = [0,]
-	sequence = [0]
-	while stack:
-		parent = stack.pop()
-		for child in eq_graph[parent]:
-			sequence.append(child)
-			stack.append(child)
-	return sequence[::-1]
-
 def iterate_eq_graph(sequence, graph, evaluated_eqs, subsetdict):
 	shape = evaluated_eqs[0].shape
 	num_nodes = len(sequence)
@@ -444,10 +433,13 @@ def iterate_eq_graph(sequence, graph, evaluated_eqs, subsetdict):
 				node_values[parent] = series_product(temp, evaluated_eqs[parent-1], subsetdict)
 			else:
 				node_values[parent] = temp
-	return node_values
+	return node_values[0]
 
-def iterate_eq_graph_with_marginals(sequence, graph, evaluated_eqs, subsetdicts, slices, shape):
-	result = np.zeros(shape, dtype=np.float64)
-	for subsetdict, slc in zip(subsetdicts, slices):
-		result[1,slc] = iterate_eq_graph(sequence, graph, evaluated_eqs, subsetdict)[0]
+def iterate_eq_graph_with_marginals(sequence, graph, evaluated_eqs, subsetdicts, slices, shapes, result_shape):
+	num_evaluated_eqs = evaluated_eqs.shape[0]
+	result = np.zeros(result_shape, dtype=np.float64)
+	for subsetdict, slc, shape in zip(subsetdicts, slices, shapes):
+		eval_eq_subset =  evaluated_eqs[(..., *slc)].view()
+		eval_eq_subset.shape = (num_evaluated_eqs, *shape)
+		result[slc].flat = iterate_eq_graph(sequence, graph, eval_eq_subset, subsetdict).flat
 	return result
