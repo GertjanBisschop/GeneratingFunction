@@ -9,9 +9,11 @@ from collections import deque
 	numba.float64(numba.uint8[:], numba.float64[:]),
 	numba.float64(numba.uint16[:], numba.float64[:]),
 	numba.float64(numba.uint32[:], numba.float64[:]),
+	numba.float64(numba.uint64[:], numba.float64[:]),
 	numba.float64(numba.int8[:], numba.float64[:]),
 	numba.float64(numba.int16[:], numba.float64[:]),
 	numba.float64(numba.int32[:], numba.float64[:]),
+	numba.float64(numba.int64[:], numba.float64[:]),
 	])
 def simple_dot_product(A, B):
     m = A.size
