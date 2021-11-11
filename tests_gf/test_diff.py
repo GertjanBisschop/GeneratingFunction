@@ -204,7 +204,7 @@ class Test_collapse_graph:
 @pytest.mark.taylor2
 class Test_taylor2:
 	@pytest.mark.parametrize('size', [2, 3])
-	def no_test_combining_probabilities(self, size):
+	def test_combining_probabilities(self, size):
 		gfobj = self.get_gf_no_mutations(size)
 		max_k = np.full(size-1,fill_value=2, dtype=int)
 		shape = tuple(max_k+1)
@@ -247,11 +247,11 @@ class Test_taylor2:
 			var_symbolic = np.hstack((variable_array, ordered_mutype_list))
 		time = 1.5
 		result = self.evaluate_graph2(gfobj, shape, theta, var, time)
-		print(result)
+		#print(result)
 		result_with_marginals = self.evaluate_graph_marginals(gfobj, max_k, theta, var, time)
+		#print(result_with_marginals)
 		expected_result = self.evaluate_symbolic_equation(gfobj, ordered_mutype_list, max_k, theta, var_symbolic, time, sage_inverse=True)
-		print(result_with_marginals)
-		print(expected_result)
+		#print(expected_result)
 		subidx = tuple([slice(0,s) for s in shape])
 		assert np.allclose(expected_result[subidx], result)
 		assert np.allclose(expected_result, result_with_marginals)
@@ -329,7 +329,7 @@ class Test_taylor2:
 		final_result = gfdiff.iterate_eq_graph_with_marginals(dependency_sequence, eq_graph_array, results, subsetdicts, slices, shapes, final_result_shape)
 		multiplier_matrix = gfdiff.taylor_to_probability(k_max+1, theta, include_marginals=True)
 		assert final_result.shape==multiplier_matrix.shape
-		return multiplier_matrix * final_result
+		return multiplier_matrix * final_result	
 
 	def evaluate_symbolic_equation(self, gfobj, ordered_mutype_list, max_k, theta, var, time, sage_inverse=False):
 		theta = sage.all.Rational(theta)
