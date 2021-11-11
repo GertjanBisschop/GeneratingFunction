@@ -4,6 +4,41 @@ import numpy as np
 import math
 from collections import deque
 
+#numerical compensation algorithms
+#algorithm from Ogita et al. 2005. Accurate sum and dot product. Journal of Scientific Computing
+@numba.njit(numba.types.UniTuple(numba.float64, 2)(numba.float64, numba.float64))
+def two_sum(a,b):
+	x = a + b
+	y = x - a
+	e = (a - (x - y) + (b - y))
+	return x, e
+
+@numba.njit(numba.float64(numba.float64[:]))
+def casc_sum(arr):
+	s, t = 0, 0
+	for x in arr:
+		(s, e) = two_sum(s, x)
+		t+=e
+	return s + t
+
+@numba.njit([
+	numba.float64(numba.uint8[:], numba.float64[:]),
+	numba.float64(numba.uint16[:], numba.float64[:]),
+	numba.float64(numba.uint32[:], numba.float64[:]),
+	numba.float64(numba.uint64[:], numba.float64[:]),
+	numba.float64(numba.int8[:], numba.float64[:]),
+	numba.float64(numba.int16[:], numba.float64[:]),
+	numba.float64(numba.int32[:], numba.float64[:]),
+	numba.float64(numba.int64[:], numba.float64[:]),
+	])
+def casc_dot_product(A, B):
+	m = A.size
+	s, t = 0, 0
+	for i in range(A.size):
+		(s, e) = two_sum(s, A[i]*B[i])
+		t+=e
+	return s + t
+
 #derivatives base functions:
 @numba.njit([
 	numba.float64(numba.uint8[:], numba.float64[:]),
@@ -16,14 +51,14 @@ from collections import deque
 	numba.float64(numba.int64[:], numba.float64[:]),
 	])
 def simple_dot_product(A, B):
-    m = A.size
-    s = 0
-    for i in range(m):
-        s += A[i]*B[i]
-    return s
+	m = A.size
+	s = 0
+	for i in range(m):
+		s += A[i]*B[i]
+	return s
 
 @numba.njit
-def taylor_coeff_inverse_polynomial(denom, var_array, diff_array, num_branchtypes):
+def taylor_coeff_inverse_polynomial(denom, var_array, diff_array, num_branchtypes, dot_product):
 	#of the form c/f(var_array)
 	diff_array = np.array(diff_array, dtype=np.uint8)
 	total_diff_count = np.sum(diff_array)
@@ -31,17 +66,10 @@ def taylor_coeff_inverse_polynomial(denom, var_array, diff_array, num_branchtype
 	for num in diff_array:
 		fact_diff*=math.gamma(num + 1)
 	fact = math.gamma(total_diff_count + 1)/fact_diff
-	dot_product = simple_dot_product(denom, var_array)
-	#dot_product = np.zeros(2, dtype=np.float64)
-	#dot_product[0] = denom[:-num_branchtypes].dot(var_array[:-num_branchtypes])
-	#dot_product[1] = denom[-num_branchtypes:].dot(var_array[-num_branchtypes:])
 	nomd = fact * np.prod(denom[-num_branchtypes:]**diff_array)
+	if nomd==0.0:
+		return 0.0
 	denomd = dot_product**(total_diff_count + 1)
-	if denomd==0.0:
-		#denomd can be zero!
-		#pole with higher order multiplicity!
-		raise ZeroDivisionError
-	#denomd = np.sum(dot_product)**(total_diff_count + 1)
 	return (-1)**(total_diff_count) * nomd/denomd
 
 @numba.njit
@@ -66,6 +94,7 @@ def series_product(arr1, arr2, subsetdict):
 	for k in np.ndindex(shape):
 		new_idxs = subsetdict[k]
 		result[k] = np.sum(ravel_arr1[new_idxs]*(ravel_arr2[new_idxs][::-1]))
+		#result[k] = casc_sum(ravel_arr1[new_idxs]*(ravel_arr2[new_idxs][::-1]))
 	return result
 
 @numba.njit
@@ -153,9 +182,12 @@ def all_polynomials(eq_matrix, shape, var_array, num_branchtypes, mutype_shape):
 	else:
 		result = np.zeros((num_equations, *shape), dtype=np.float64)
 		for idx, eq in enumerate(eq_matrix):
+			dot_product = simple_dot_product(eq, var_array)
+			if dot_product==0:
+				raise ZeroDivisionError
 			for idx2, mutype in zip(np.ndindex(shape), np.ndindex(mutype_shape)):
 				#mutype = np.array(mutype, dtype=np.uint8)
-				result[(idx, *idx2)] = taylor_coeff_inverse_polynomial(eq, var_array, mutype, num_branchtypes)
+				result[(idx, *idx2)] = taylor_coeff_inverse_polynomial(eq, var_array, mutype, num_branchtypes, dot_product)
 		return result
 
 @numba.njit
@@ -429,8 +461,9 @@ def iterate_eq_graph(sequence, graph, evaluated_eqs, subsetdict):
 	for parent in sequence:
 		children = graph[parent]
 		temp = np.zeros(shape, dtype=np.float64)
-		for child in children:
-			temp+=node_values[child]
+		if len(children)>0:
+			for child in children:
+				temp+=node_values[child]
 			if parent!=0:
 				node_values[parent] = series_product(temp, evaluated_eqs[parent-1], subsetdict)
 			else:
