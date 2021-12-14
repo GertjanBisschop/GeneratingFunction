@@ -259,18 +259,21 @@ def compile_inverted_eq(eq_matrix, shape, subsetdict, delta_in_nom, mutype_shape
 		constants =  numerators_eq.dot(var)
 		leading_constant = np.prod(constants[constants>0])
 		#make derivative matrix for all pairwise differences eq_matrix 
-		polyf = all_polynomials(eq_matrix_diffs, shape, var, num_branchtypes, mutype_shape)
-		#combine derivative matrix results
-		denoms = product_pairwise_diff_inverse_polynomial(
-			polyf, (num_terms, *shape), pairwise_idxs, subsetdict
-			)
-		#n terms, both expf and denoms should be of length n
-		expf = all_exponentials(denominators_eq, shape, var, time, num_branchtypes, mutype_shape)
-		#adapt with signs! diff dims!
-		terms = product_f_g(subsetdict, expf, denoms[:num_equations], signs)
-		all_terms = np.sum(terms, axis=0)
-		if not delta_in_nom:
-			all_terms += denoms[-1]
+		try:
+			polyf = all_polynomials(eq_matrix_diffs, shape, var, num_branchtypes, mutype_shape)
+			#combine derivative matrix results
+			denoms = product_pairwise_diff_inverse_polynomial(
+				polyf, (num_terms, *shape), pairwise_idxs, subsetdict
+				)
+			#n terms, both expf and denoms should be of length n
+			expf = all_exponentials(denominators_eq, shape, var, time, num_branchtypes, mutype_shape)
+			#adapt with signs! diff dims!
+			terms = product_f_g(subsetdict, expf, denoms[:num_equations], signs)
+			all_terms = np.sum(terms, axis=0)
+			if not delta_in_nom:
+				all_terms += denoms[-1]
+		except ZeroDivisionError:
+			raise ZeroDivisionError
 		return leading_constant * all_terms
 	
 	return _make_eq
@@ -289,6 +292,7 @@ def compile_non_inverted_eq(eq_matrix, shape, mutype_shape):
 	return _make_eq
 
 def prepare_graph_evaluation(eq_matrix, to_invert_array, eq_array, shape, delta_idx, subsetdict, mutype_shape):
+	#generates function for each node of the equation graph
 	if delta_idx is None:
 		eq_matrix_no_delta = eq_matrix
 	else:		
@@ -324,6 +328,8 @@ def prepare_graph_evaluation_with_marginals(eq_matrix, to_invert_array, eq_array
 	return all_fs
 
 def evaluate_single_point(shape, f_non_inverted, *f_inverted):
+	#evaluates single point in parameter space
+	#result will be of shape (num_nodes, shape)
 	def _eval_single_point(var, time):
 		eval_f_non_inverted = f_non_inverted(var)
 		eval_inverted = np.zeros((len(f_inverted), *shape), dtype = np.float64)
@@ -452,7 +458,7 @@ def iterate_graph(sequence, graph, adjacency_matrix, evaluated_eqs, subsetdict):
 		node_values[parent] = temp
 			
 	return node_values
-
+#use numba.typed.List of np.arrays for graph to be able to compile this function
 def iterate_eq_graph(sequence, graph, evaluated_eqs, subsetdict):
 	shape = evaluated_eqs[0].shape
 	num_nodes = len(sequence)
