@@ -133,6 +133,50 @@ def return_strictly_smaller_than_idx(idx, shape):
 				lambda x: x!=idx or sum(x)!=0, all_indices)], dtype=int
 		)
 
+#making subsetdict with marginals
+@numba.njit
+def increment_marginal(arr, idx, max_value, reset_value):
+	if idx<0:
+		return -1
+	i = arr[idx]
+	i+=1
+	if i>max_value[idx]:
+		arr[idx] = reset_value[idx]
+		idx-=1
+		result = increment_marginal(arr, idx, max_value, reset_value)
+	else:
+		result = 0
+		arr[idx] = i
+	return result
+
+@numba.njit
+def return_smaller_than_idx_marg(start, max_value, shape):
+	reset_value = start.copy()
+	yield ravel_multi_index(start, shape)
+	check = increment_marginal(start, len(shape)-1, max_value, reset_value)
+	while check==0:
+		yield ravel_multi_index(start, shape)
+		check = increment_marginal(start, len(shape)-1, max_value, reset_value)
+
+def product_subsetdict_marg(shape):
+	result = numba.typed.Dict()
+	for idx in np.ndindex(shape):
+		reset_value = np.zeros(len(shape), dtype=np.int64)
+		temp_size = 1
+		for i,v in enumerate(idx): 
+			if v==shape[i]-1:
+				reset_value[i] = v
+			else:
+				temp_size*=idx[i]+1
+		result[idx] = np.zeros(temp_size, dtype=np.int64)
+		i = 0
+		for r in return_smaller_than_idx_marg(reset_value, idx, np.array(shape, dtype=np.int64)):
+			result[idx][i] = r
+			i+=1
+		assert i==temp_size
+	
+	return result
+
 def product_subsetdict(shape):
 	if len(shape)==0:
 		shape = (1,)
@@ -355,7 +399,7 @@ def evaluate_single_point_with_marginals(k_max, f_array, num_eq_tuple, slices):
 	return _eval_single_point
 
 def marginals_nuissance_objects(k_max):
-	#all transforms of the same thing
+	#all transforms of the same thing, can be improved!
 	marg_boolean = generate_booleans(k_max)
 	#use marg_bool as diff[marg_bool]=0
 	shapes = list(generate_shapes(k_max, marg_boolean))
@@ -365,10 +409,12 @@ def marginals_nuissance_objects(k_max):
 	return (marg_boolean, shapes, mutype_shapes, subsetdicts, slices)
 
 def generate_booleans(k_max):
+	#False = no marginal, True = marginal
 	num_repeats = len(k_max)
 	return np.array([a for a in itertools.product(range(2), repeat=num_repeats)], dtype=bool)
 
 def generate_shapes(k_max, marg_boolean):
+	#shape with marginal dimensions dropped
 	for mb in ~marg_boolean:
 		result = tuple(k_max[mb]+1)
 		if len(result)==0:
@@ -377,6 +423,7 @@ def generate_shapes(k_max, marg_boolean):
 			yield result
 
 def generate_mutype_shapes(k_max, marg_boolean, shapes):
+	#mutype_shape is 1 when marginal, else k_max+1
 	num_branchtypes = len(k_max)
 	for mb, shape in zip(~marg_boolean, shapes):
 		mutype_shape = np.ones(num_branchtypes, dtype=int)
