@@ -6,7 +6,7 @@ from scipy.special import factorial
 
 import gf.gf as gflib
 import gf.mutations as mutations
-import gf.togimble as tg
+#import gf.togimble as tg
 import gf.matrix_representation as gfmat
 import gf.diff as gfdiff
 
@@ -285,7 +285,7 @@ class Test_taylor2:
 		results = evaluator(var, time)
 		final_result = gfdiff.iterate_graph(dependency_sequence, collapsed_graph_array, adjacency_matrix, results, subsetdict)
 		final_result = final_result[0]
-		multiplier_matrix = gfdiff.taylor_to_probability(shape, theta, include_marginals=False)
+		multiplier_matrix = gfdiff.taylor_to_probability(gfdiff.taylor_to_probability_coeffs(shape, include_marginals=False), theta)
 		assert final_result.shape==multiplier_matrix.shape
 		return multiplier_matrix * final_result
 
@@ -299,7 +299,7 @@ class Test_taylor2:
 		results = evaluator(var, time)
 		final_result = gfdiff.iterate_eq_graph(dependency_sequence, eq_graph_array, results, subsetdict)
 		#final_result = final_result[0]
-		multiplier_matrix = gfdiff.taylor_to_probability(shape, theta, include_marginals=False)
+		multiplier_matrix = gfdiff.taylor_to_probability(gfdiff.taylor_to_probability_coeffs(shape, include_marginals=False), theta)
 		assert final_result.shape==multiplier_matrix.shape
 		return multiplier_matrix * final_result
 
@@ -329,7 +329,7 @@ class Test_taylor2:
 		subsetdict_with_marginals = gfdiff.product_subsetdict_marg(tuple(final_result_shape))
 		final_result = gfdiff.iterate_eq_graph(dependency_sequence, eq_graph_array, results, subsetdict_with_marginals)
 		#final_result = gfdiff.iterate_eq_graph_with_marginals(dependency_sequence, eq_graph_array, results, subsetdicts, slices, shapes, final_result_shape)
-		multiplier_matrix = gfdiff.taylor_to_probability(k_max+1, theta, include_marginals=True)
+		multiplier_matrix = gfdiff.taylor_to_probability(gfdiff.taylor_to_probability_coeffs(k_max+1, include_marginals=True), theta)
 		assert final_result.shape==multiplier_matrix.shape
 		return multiplier_matrix * final_result	
 

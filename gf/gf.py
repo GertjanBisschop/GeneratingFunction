@@ -705,7 +705,7 @@ def remap_eq_arrays(eq_graph_dict, equation_dict, node_idx, inverted_node_idx):
 		}
 	to_invert_array = np.ones(total_num_nodes, dtype=bool)
 	to_invert_array[:max_node_idx] = 0
-	eq_graph_array = [tuple(eq_graph_dict[i]) if i in eq_graph_dict else tuple() for i in range(total_num_nodes+1)]
+	eq_graph_array = tuple([np.array(eq_graph_dict[i], dtype=np.int64) if i in eq_graph_dict else np.array([], dtype=np.int64) for i in range(total_num_nodes+1)])
 	eq_array = [tuple(equation_dict[i]) if i in equation_dict else tuple() for i in range(1,total_num_nodes+1)]
 
 	return (eq_graph_array, eq_array, to_invert_array)
