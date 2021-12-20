@@ -435,19 +435,33 @@ def generate_slices(k_max, marg_boolean):
 	for b in marg_boolean:
 		yield tuple([slice(0,k_max[i]+1) if not bi else slice(k_max[i]+1, k_max[i]+2) for i, bi in enumerate(b)])
 
-def taylor_to_probability(shape, theta, include_marginals=False):
+def taylor_to_probability_coeffs(shape, include_marginals=False):
 	if not include_marginals:
-		temp = np.zeros(shape)
+		temp = np.zeros(shape, dtype=np.uint8)
 		for idx in np.ndindex(shape):
 			temp[idx] = np.sum(idx)
 	else:
 		mod_factor = np.array(shape)
 		shape = mod_factor + 1
-		temp = np.zeros(shape)
+		temp = np.zeros(shape, dtype=np.uint8)
 		for idx in np.ndindex(temp.shape):
 			idx_marginals = np.mod(np.array(idx), mod_factor)
 			temp[idx] = np.sum(idx_marginals)
-	return (-1*theta)**temp
+	return temp
+
+@numba.njit
+def taylor_to_probability(precomp, theta):
+	max_idx = np.max(precomp) + 1
+	temp = np.zeros(max_idx, dtype=np.float64)
+	power = 0
+	for idx in range(max_idx):
+		temp[idx] = (-1 * theta)**power
+		power+=1
+	shape = precomp.shape
+	result = np.zeros(shape, dtype=np.float64)
+	for idx in np.ndindex(shape):
+		result[idx] = temp[precomp[idx]]
+	return result
 
 def paths(graph, adjacency_matrix):
 	stack = [(0, [])]
@@ -505,7 +519,8 @@ def iterate_graph(sequence, graph, adjacency_matrix, evaluated_eqs, subsetdict):
 		node_values[parent] = temp
 			
 	return node_values
-#use numba.typed.List of np.arrays for graph to be able to compile this function
+
+@numba.njit
 def iterate_eq_graph(sequence, graph, evaluated_eqs, subsetdict):
 	shape = evaluated_eqs[0].shape
 	num_nodes = len(sequence)
